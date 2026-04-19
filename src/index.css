@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #f3f4f6;
+}
+
+/* --- CSS KHUSUS PRINT (THERMAL) --- */
+@media print {
+  /* Sembunyikan semua elemen UI aplikasi saat print */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Tampilkan hanya area struk */
+  #printable-receipt, #printable-receipt * {
+    visibility: visible;
+  }
+
+  /* Posisikan struk di pojok kiri atas kertas */
+  #printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Hilangkan margin halaman browser default */
+  @page {
+    margin: 0;
+    size: auto; 
+  }
+}
