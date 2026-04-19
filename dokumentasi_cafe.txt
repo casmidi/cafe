@@ -1,0 +1,461 @@
+DOKUMENTASI TEKNIS APLIKASI CAFE 86
+Versi dokumen: 1.0
+Tanggal: 2026-04-19
+Workspace: d:/taskora
+
+====================================================================
+1) RINGKASAN SISTEM
+====================================================================
+Aplikasi ini adalah sistem manajemen restoran/kafe full-stack dengan modul POS,
+inventory, kitchen display, purchasing, HR (attendance/payroll), laporan, member,
+dan QR order.
+
+Komponen utama:
+- Frontend: React + Vite (resto-frontend)
+- Backend API: PHP (plain MVC-style) + PDO + JWT (resto-backend/api)
+- Database: MySQL/MariaDB (nama DB saat ini: restotaskora)
+- Payment gateway: Midtrans (snap/webhook)
+- Push/email: web-push + PHPMailer
+- Deployment sekarang: subdomain cafe.quantum.or.id via Cloudflare Tunnel
+
+Catatan penting:
+- Dokumentasi schema DB di bawah disusun dari pembacaan source code karena file
+  dump SQL tidak ditemukan di repository.
+
+====================================================================
+2) TEKNOLOGI YANG DIGUNAKAN
+====================================================================
+Frontend:
+- React 18
+- React Router DOM v6
+- Zustand (state global UI)
+- Axios
+- Tailwind CSS
+- Recharts
+- face-api.js (attendance face matching)
+- Framer Motion
+
+Backend:
+- PHP 8+
+- PDO (MySQL)
+- firebase/php-jwt
+- vlucas/phpdotenv
+- PHPMailer
+- mPDF (PDF PO)
+- PhpSpreadsheet
+- minishlink/web-push
+
+Infrastruktur:
+- Apache (XAMPP) sebagai origin web server
+- cloudflared tunnel untuk expose ke internet
+- Cloudflare DNS/proxy
+
+====================================================================
+3) STRUKTUR FOLDER (RINGKAS)
+====================================================================
+Frontend (resto-frontend):
+- src/App.jsx: router utama + bootstrapping data settings
+- src/main.jsx: app mount + global error boundary
+- src/pages: halaman per modul
+- src/components: komponen shared (layout, header, modal, receipt)
+- src/store/useUIStore.js: state global UI/settings
+- public: aset statis (logo, icon, models)
+
+Backend (resto-backend/api):
+- index.php: single entry router berdasarkan query param route
+- controllers: orkestrasi request/response
+- models: query database per entitas
+- config/Database.php: koneksi DB
+- config/Cors.php: CORS handler
+- helpers/JWTHandler.php: generate/validate token
+
+====================================================================
+4) KONFIGURASI DAN ENV
+====================================================================
+Frontend:
+- src/config.js membaca VITE_API_BASE_URL
+- .env (dev) dan .env.production (prod)
+- base URL API saat production diarahkan ke:
+  https://cafe.quantum.or.id/backend/api/index.php?route=
+
+Backend .env (saat ini):
+- APP_ENV=production
+- APP_URL=https://cafe.quantum.or.id/backend
+- DB_NAME=restotaskora
+- JWT_ISSUER/JWT_AUDIENCE=cafe.quantum.or.id
+- ALLOWED_ORIGINS mencakup localhost dev dan domain production
+
+====================================================================
+5) ALUR PROGRAM (END-TO-END)
+====================================================================
+5.1 Alur startup frontend
+1. Browser load index.html
+2. main.jsx render App dengan AppErrorBoundary
+3. App.jsx menjalankan checkLicenseAndSettings()
+4. App fetch GET public/info untuk nama/logo outlet
+5. Router menentukan halaman berdasarkan path
+6. Halaman protected cek token di localStorage
+
+5.2 Alur request backend
+1. Semua request masuk ke api/index.php?route=...
+2. Router switch-case memetakan route + HTTP method ke controller
+3. Controller authenticate (jika butuh) via JWT token
+4. Controller memanggil model
+5. Model eksekusi query SQL via PDO
+6. Response JSON dikembalikan ke frontend
+
+5.3 Alur transaksi POS
+1. Kasir checkout dari halaman POS
+2. Backend TransactionController::checkout()
+3. Model Transaction::create() simpan header transaksi + item
+4. Stock bahan berkurang berdasarkan recipe (product_recipes/variant_recipes)
+5. Log mutasi stok dicatat ke stock_logs
+6. Jika member: poin dihitung dan diupdate (point_logs)
+7. Jika pending/payment method tertentu, status disesuaikan
+
+5.4 Alur void/split/pay pending
+- void: status transaksi + item diubah, stok dikembalikan, table dibebaskan
+- split: sebagian item dipindah ke transaksi baru, total direkalkulasi
+- pay pending: menyelesaikan transaksi yang sebelumnya belum lunas
+
+5.5 Alur QR order (public)
+1. Customer akses menu publik via route public/menu
+2. Customer submit order ke public/order
+3. Kitchen menerima item pending via kitchen/orders
+4. Status item diperbarui via kitchen/update-status
+
+====================================================================
+6) DAFTAR MODUL API (ROUTE)
+====================================================================
+Base endpoint:
+- /backend/api/index.php?route=<route>
+
+License:
+- GET  license/check
+- POST license/activate
+
+Public:
+- GET  public/menu
+- POST public/order
+- GET  public/info
+- GET  public/status
+
+Auth karyawan/admin:
+- POST auth/login
+- POST auth/forgot
+- POST auth/reset
+- GET  auth/me
+
+Analytics:
+- GET analytics/menu
+- GET analytics/forecast
+- GET analytics/peak-hours
+
+Customer/member:
+- POST auth/customer-login
+- POST auth/customer-register
+- POST auth/customer-forgot
+- POST auth/customer-reset
+- GET  customer/profile
+- PUT  customer/update-profile
+- GET/POST/PUT/DELETE customers
+- GET customers/detail
+
+Users:
+- GET/POST/PUT/DELETE users
+- POST users/register-face
+
+Attendance/payroll:
+- POST attendance/clock-in
+- POST attendance/clock-out
+- GET  attendance/history
+- GET  attendance/all-history
+- POST payroll/generate
+- GET  payroll/list
+
+Expenses:
+- GET/POST/DELETE expenses
+
+Notifications:
+- POST webhook/midtrans
+- GET  notifications/unread
+- POST notifications/read
+
+Master data:
+- GET/POST master/categories
+- GET/POST/PUT master/products
+- POST/DELETE master/products/variant
+- POST/DELETE master/products/modifier
+- GET/POST/DELETE master/tables
+- POST master/tables/position
+- POST master/tables/status
+
+Inventory/recipe:
+- GET/POST/PUT inventory/ingredients
+- POST inventory/opname
+- GET  inventory/opname-history
+- GET/POST/DELETE recipe
+- GET/POST/DELETE recipe/variant
+
+POS:
+- POST pos/checkout
+- GET  pos/history
+- GET  pos/detail
+- POST pos/void
+- POST pos/split
+- POST pos/pay-pending
+
+Shift:
+- GET  shift/current
+- POST shift/open
+- POST shift/close
+- GET  shift/history
+
+Kitchen:
+- GET  kitchen/orders
+- POST kitchen/update-status
+
+Purchasing:
+- GET/POST purchasing/suppliers
+- POST purchasing/create
+- GET  purchasing/pending
+- GET  purchasing/detail
+- POST purchasing/receive
+- GET  purchasing/download
+
+Discount/report/settings:
+- GET/POST/PUT/DELETE discounts
+- GET reports/sales
+- GET reports/stock
+- GET reports/profit
+- GET/POST settings
+
+====================================================================
+7) DATABASE YANG DIGUNAKAN
+====================================================================
+Jenis DB:
+- MySQL/MariaDB (via PDO)
+
+Nama DB saat ini:
+- restotaskora
+
+Entitas/tabel yang teridentifikasi dari kode:
+- outlets
+- users
+- customers
+- point_logs
+- categories
+- products
+- product_variants
+- product_modifiers
+- ingredients
+- product_recipes
+- variant_recipes
+- tables
+- transactions
+- transaction_items
+- shifts
+- stock_logs
+- discounts
+- suppliers
+- purchases
+- purchase_items
+- expenses
+- payrolls
+- notifications
+
+Relasi penting (konseptual):
+- outlets 1..* users, customers, products, ingredients, tables, transactions, shifts
+- categories 1..* products
+- products 1..* product_variants, product_modifiers
+- products/product_variants/modifiers -> recipe tables -> ingredients
+- transactions 1..* transaction_items
+- transactions *..1 customers (opsional)
+- transactions *..1 tables (opsional)
+- shifts *..1 users
+- purchases 1..* purchase_items
+
+Kolom penting yang tampak dari code:
+- transactions: invoice_no, total_amount, discount_amount, tax_amount,
+  service_charge, final_amount, payment_method, payment_status,
+  points_earned, points_redeemed
+- transaction_items: product_id, qty, price, variant_id, modifiers, status
+- customers: points, tier, total_spent, reset_token
+- ingredients: current_stock, cost_per_unit
+- stock_logs: type, qty, reference_id, note
+
+====================================================================
+8) FUNGSI-FUNGSI UTAMA BACKEND (RINGKAS)
+====================================================================
+8.1 Controller layer
+- AuthController:
+  login, forgotPassword, resetPassword, sendEmailOTP
+- UserController:
+  getUsers, createUser, updateUser, deleteUser, getMyProfile, registerFace
+- CustomerController:
+  register, customerLogin, profile update, customer CRUD, OTP reset
+- TransactionController:
+  checkout, getHistory, getDetail, voidTransaction, splitBill, payPending
+- InventoryController:
+  ingredient CRUD, stockOpname, opname history
+- KitchenController:
+  getActiveOrders, updateItemStatus
+- ShiftController:
+  getCurrentShift, openShift, closeShift, getHistory
+- PurchasingController:
+  supplier CRUD ringan, create/receive purchase, pending/detail, downloadPO
+- ReportController:
+  sales, stock logs, profit summary
+- SettingController:
+  getSettings, updateSettings
+- AttendanceController:
+  clock-in/clock-out + face/distance validation
+- AnalyticsController:
+  menu performance, stock forecast, peak hours
+
+8.2 Model layer
+- Transaction model adalah core paling kompleks:
+  create, void, split, payPending, recalculate total,
+  deduct/restore stock by recipe, generate invoice
+- Customer model menangani poin dan tier member
+- Purchase model menangani penerimaan barang dan update stok
+- Recipe model menentukan konsumsi ingredient
+
+====================================================================
+9) ALUR FRONTEND PER MODUL
+====================================================================
+Halaman utama (src/pages):
+- Login: autentikasi karyawan
+- Dashboard: ringkasan operasional
+- POS: transaksi kasir
+- Orders/Kitchen: antrean pesanan
+- Inventory/StockOpname: stok bahan
+- Purchasing/Receiving: PO dan penerimaan
+- Reports/Analytics: laporan
+- Shift/Attendance/Payroll: HR
+- TableLayout/QROrder/OrderStatus: dine-in + order publik
+- Customers/CustomerLogin/CustomerDashboard: member
+
+Komponen global:
+- Layout + Sidebar + Header
+- GlobalModals (loading/alert/confirm)
+- Receipt (cetak struk)
+
+State global:
+- useUIStore: loading, alert, confirm, appSettings (logo/nama)
+
+====================================================================
+10) KELEMAHAN SAAT INI DAN USULAN PERBAIKAN
+====================================================================
+10.1 Kelemahan arsitektur
+1. Router API masih switch-case besar (index.php sangat panjang).
+   Dampak: maintainability rendah, rawan konflik saat tim membesar.
+   Usulan:
+   - Refactor ke router map terpisah per module (auth.php, pos.php, inventory.php).
+   - Tambahkan middleware chain (auth, role, validation).
+
+2. Belum ada versi API (v1/v2).
+   Dampak: breaking change sulit dikontrol.
+   Usulan:
+   - Gunakan prefix route versioning.
+
+3. Banyak logic bisnis berada di model transaction yang sangat gemuk.
+   Dampak: sulit testing, sulit debug.
+   Usulan:
+   - Pecah ke service: TransactionService, StockService, PointsService.
+
+10.2 Kelemahan kualitas data/logika
+1. Query SQL tidak selalu pakai transaksi database di semua alur mutasi multi-step.
+   Dampak: data inkonsisten saat error di tengah proses.
+   Usulan:
+   - Standarkan beginTransaction/commit/rollback di semua operasi kritikal.
+
+2. Potensi race condition stok saat checkout bersamaan.
+   Dampak: stok bisa negatif/oversell.
+   Usulan:
+   - Lock baris ingredient (SELECT ... FOR UPDATE) saat deduct stock.
+   - Tambahkan validasi stok minimum sebelum commit.
+
+3. Beberapa fallback config masih mengarah ke brand/domain lama pada helper tertentu.
+   Dampak: inkonsistensi branding/security metadata.
+   Usulan:
+   - Audit fallback env di seluruh helper dan satukan naming.
+
+10.3 Kelemahan kinerja
+1. Bundle frontend cukup besar (chunk besar >500KB).
+   Dampak: load lambat di jaringan mobile.
+   Usulan:
+   - Lanjutkan code-splitting granular per page/feature.
+   - Dynamic import library berat (face-api/recharts) hanya saat dipakai.
+
+2. Penggunaan localStorage cukup banyak untuk settings/session parsial.
+   Dampak: potensi stale cache dan perilaku tak sinkron antar tab.
+   Usulan:
+   - Simpan sumber kebenaran di backend, localStorage hanya cache ringan.
+   - Tambah invalidation strategy.
+
+10.4 Kelemahan keamanan
+1. Belum terlihat rate limiting endpoint login/forgot password.
+   Dampak: rentan brute force/abuse OTP.
+   Usulan:
+   - Tambahkan rate limiter per IP + per identifier.
+
+2. Secret dan credential tampak masih placeholder/dev-style di env.
+   Dampak: risiko keamanan production.
+   Usulan:
+   - Rotate JWT secret, gunakan secret manager, harden env policy.
+
+3. Belum ada audit log terstruktur untuk aktivitas sensitif.
+   Dampak: sulit forensik.
+   Usulan:
+   - Buat tabel audit_logs untuk login, reset password, void, perubahan setting.
+
+10.5 Kelemahan observability/testing
+1. Belum ada unit test/integration test otomatis di repo.
+   Dampak: regresi mudah lolos.
+   Usulan:
+   - Tambah test backend (PHPUnit/Pest) untuk auth, POS, inventory.
+   - Tambah frontend test untuk route kritikal (login, checkout).
+
+2. Logging error belum terstruktur sentral.
+   Dampak: troubleshooting lambat.
+   Usulan:
+   - Gunakan format JSON logs + request ID.
+   - Tambahkan health endpoint dan dashboard monitoring.
+
+====================================================================
+11) REKOMENDASI ROADMAP PRIORITAS
+====================================================================
+Prioritas tinggi (1-2 minggu):
+- Stabilkan security: rotate secrets, rate limit auth/OTP, audit .env produksi
+- Stabilkan data: transactional consistency untuk checkout/void/purchase receive
+- Perbaiki observability: error log terstruktur + request tracing
+
+Prioritas menengah (2-4 minggu):
+- Refactor router dan service layer
+- Tambah test otomatis modul inti (auth, transaction, stock)
+- Optimasi bundle besar (lazy loading library berat)
+
+Prioritas lanjutan:
+- API versioning
+- Queue untuk pekerjaan berat (email/push/report export)
+- Caching yang terukur (Redis) untuk dashboard/report
+
+====================================================================
+12) CATATAN UNTUK PROGRAMMER BARU
+====================================================================
+Urutan membaca kode yang disarankan:
+1. api/index.php (route map)
+2. controller target modul (mis. TransactionController)
+3. model terkait (Transaction, Ingredient, Customer)
+4. frontend App.jsx + page modul
+5. flow request dari UI -> API -> DB
+
+Checklist sebelum coding fitur baru:
+- Pastikan route + method konsisten
+- Tambah validasi input
+- Pertimbangkan transaksi DB jika multi query mutasi
+- Update dokumentasi endpoint
+- Uji skenario gagal dan rollback
+
+Akhir dokumen.
