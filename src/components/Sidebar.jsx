@@ -3,10 +3,12 @@ import {
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import useUIStore from '../store/useUIStore';
+import { FALLBACK_LOGO_URL, normalizeLogoUrl } from '../utils/logoUrl';
 
 export default function Sidebar({ isOpen, toggleSidebar, handleLogout }) {
     const location = useLocation();
     const { appSettings } = useUIStore();
+    const logoSrc = normalizeLogoUrl(appSettings?.logo_url || FALLBACK_LOGO_URL);
 
     // Ambil role user dari localStorage
     const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -76,9 +78,13 @@ export default function Sidebar({ isOpen, toggleSidebar, handleLogout }) {
                 {/* HEADER SIDEBAR */}
                 <div className="h-20 flex items-center justify-center px-6 border-b border-gray-50 relative shrink-0">
                     <img
-                        src={appSettings?.logo_url || "/taskora-logo.png?v=86"}
+                        src={logoSrc}
                         alt={appSettings?.name || "Logo"}
                         className="h-10 w-auto object-contain"
+                        onError={(e) => {
+                            e.currentTarget.onerror = null;
+                            e.currentTarget.src = normalizeLogoUrl(FALLBACK_LOGO_URL);
+                        }}
                     />
                     <button onClick={toggleSidebar} className="lg:hidden absolute right-4 text-gray-400 hover:text-brand-primary p-1">
                         <X size={24} />

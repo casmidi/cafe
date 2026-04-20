@@ -3,6 +3,7 @@ import { useEffect, useState, lazy, Suspense } from 'react';
 import axios from 'axios';
 import { API_URL } from './config';
 import useUIStore from './store/useUIStore';
+import { FALLBACK_LOGO_URL, normalizeLogoUrl } from './utils/logoUrl';
 
 // Import Semua Halaman
 import Login from './pages/Login';
@@ -66,15 +67,38 @@ function App() {
     try {
       const infoRes = await axios.get(API_URL + 'public/info');
       if (infoRes.data.status) {
-        const { name } = infoRes.data.data;
+        const { name, logo_url } = infoRes.data.data;
+        const normalizedUrl = normalizeLogoUrl(logo_url || FALLBACK_LOGO_URL);
+
+        // Simpan ke localStorage untuk fallback saat reloadlokal atau loading
+        localStorage.setItem('cachedOutletInfo', JSON.stringify({
+          name: name,
+          logo_url: normalizedUrl,
+          timestamp: Date.now()
+        }));
+
+        // Update global app settings
         setAppSettings({
           name: name,
-          // Prioritaskan logo lokal agar cukup ganti file di public/taskora-logo.png
-          logo_url: '/taskora-logo.png?v=86'
+          logo_url: normalizedUrl
         });
       }
     } catch (error) {
       console.error(error);
+
+      // Fallback: coba ambil dari localStorage cache
+      const cached = localStorage.getItem('cachedOutletInfo');
+      if (cached) {
+        try {
+          const data = JSON.parse(cached);
+          setAppSettings({
+            name: data.name,
+            logo_url: data.logo_url
+          });
+        } catch (e) {
+          console.error('Failed to parse cached outlet info:', e);
+        }
+      }
     }
   };
   // const checkLicenseAndSettings = async () => {
@@ -102,7 +126,7 @@ function App() {
   //   }
   // };
 
-  // Tampilkan Loading Putih saat cek lisensi
+  // Tampilkan Loading Putih saat cek lisensi & load info public
   if (isLicensed === null) {
     return <div className="min-h-screen bg-white flex items-center justify-center">Checking License...</div>;
   }

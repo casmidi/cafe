@@ -4,6 +4,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Phone, Lock, Loader2, ArrowRight, Mail, ShieldCheck, User } from 'lucide-react';
 import { API_URL } from '../config';
 import useUIStore from '../store/useUIStore';
+import { FALLBACK_LOGO_URL } from '../utils/logoUrl';
 
 export default function CustomerLogin() {
     const [identifier, setIdentifier] = useState(''); // HP atau Email
@@ -36,9 +37,13 @@ export default function CustomerLogin() {
         <div className="min-h-screen flex items-center justify-center bg-brand-bg p-4 font-sans">
             <div className="bg-white w-full max-w-sm p-8 rounded-3xl shadow-2xl text-center border border-white">
                 <img
-                    src={appSettings?.logo_url || "/taskora-logo.png?v=86"}
+                    src={appSettings?.logo_url || FALLBACK_LOGO_URL}
                     alt="Logo"
                     className="h-16 mx-auto mb-6 object-contain"
+                    onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = FALLBACK_LOGO_URL;
+                    }}
                 />
                 <h2 className="text-2xl font-bold text-brand-darkest mb-2">Member Area</h2>
                 <p className="text-gray-500 text-sm mb-8">Masuk untuk cek poin & promo spesial.</p>

@@ -2,20 +2,21 @@ import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Plus, Search, Tag, Box, Image as ImageIcon, Loader2, ChefHat, Trash2, X, ChevronDown, Info, Edit3, Calculator, Layers, CheckSquare, FlaskConical } from 'lucide-react';
 import useUIStore from '../store/useUIStore';
-import { API_URL } from '../config'; 
+import { API_URL } from '../config';
 
 export default function Menu() {
     const [categories, setCategories] = useState([]);
     const [products, setProducts] = useState([]);
     const [ingredients, setIngredients] = useState([]);
     const [activeCategory, setActiveCategory] = useState('all');
-    
+
     const [showAddCat, setShowAddCat] = useState(false);
-    const [showProductModal, setShowProductModal] = useState(false); 
-    const [isEditing, setIsEditing] = useState(false); 
-    
+    const [editingCategoryId, setEditingCategoryId] = useState('');
+    const [showProductModal, setShowProductModal] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+
     // Variant & Modifier State
-    const [activeTab, setActiveTab] = useState('info'); 
+    const [activeTab, setActiveTab] = useState('info');
     const [newVariant, setNewVariant] = useState({ name: '', price: '' });
     const [newModifier, setNewModifier] = useState({ name: '', price: '' });
 
@@ -25,13 +26,13 @@ export default function Menu() {
     const [recipeItems, setRecipeItems] = useState([]);
     const [newRecipeItem, setNewRecipeItem] = useState({ ingredient_id: '', qty: '' });
 
-    const [ingredientSearch, setIngredientSearch] = useState(''); 
-    const [showIngredientList, setShowIngredientList] = useState(false); 
-    const ingredientInputRef = useRef(null); 
+    const [ingredientSearch, setIngredientSearch] = useState('');
+    const [showIngredientList, setShowIngredientList] = useState(false);
+    const ingredientInputRef = useRef(null);
 
     const [newCatName, setNewCatName] = useState('');
-    const [prodForm, setProdForm] = useState({ 
-        id: '', name: '', price: '', category_id: '', description: '', sku: '', image: '', variants: [], modifiers: [] 
+    const [prodForm, setProdForm] = useState({
+        id: '', name: '', price: '', category_id: '', description: '', sku: '', image: '', variants: [], modifiers: []
     });
 
     const { showLoading, hideLoading, showAlert, showConfirm } = useUIStore();
@@ -54,7 +55,7 @@ export default function Menu() {
             const [catRes, prodRes, ingRes] = await Promise.all([
                 axios.get(API_URL + 'master/categories', config),
                 axios.get(API_URL + 'master/products', config),
-                axios.get(API_URL + 'inventory/ingredients', config) 
+                axios.get(API_URL + 'inventory/ingredients', config)
             ]);
 
             if (catRes.data.status) setCategories(catRes.data.data);
@@ -68,14 +69,58 @@ export default function Menu() {
     };
 
     // ... (Kategori & Produk Handlers tetap sama)
-    const handleAddCategory = async (e) => {
+    const openCategoryModal = () => {
+        setEditingCategoryId('');
+        setNewCatName('');
+        setShowAddCat(true);
+    };
+
+    const handleSaveCategory = async (e) => {
         e.preventDefault();
+        if (!newCatName.trim()) return;
+
         showLoading('Menyimpan...');
         try {
-            await axios.post(API_URL + 'master/categories', { name: newCatName }, { headers: { Authorization: `Bearer ${token}` } });
-            showAlert('success', 'Berhasil', 'Kategori ditambahkan');
-            setNewCatName(''); setShowAddCat(false); fetchMasterData();
-        } catch (error) { showAlert('error', 'Gagal', 'Gagal menambah kategori'); } finally { hideLoading(); }
+            if (editingCategoryId) {
+                await axios.put(API_URL + 'master/categories', { id: editingCategoryId, name: newCatName }, { headers: { Authorization: `Bearer ${token}` } });
+                showAlert('success', 'Berhasil', 'Kategori diperbarui');
+            } else {
+                await axios.post(API_URL + 'master/categories', { name: newCatName }, { headers: { Authorization: `Bearer ${token}` } });
+                showAlert('success', 'Berhasil', 'Kategori ditambahkan');
+            }
+
+            setEditingCategoryId('');
+            setNewCatName('');
+            fetchMasterData();
+        } catch (error) {
+            showAlert('error', 'Gagal', error.response?.data?.message || 'Gagal menyimpan kategori');
+        } finally { hideLoading(); }
+    };
+
+    const handleEditCategory = (category) => {
+        setEditingCategoryId(category.id);
+        setNewCatName(category.name || '');
+        setShowAddCat(true);
+    };
+
+    const handleDeleteCategory = (id) => {
+        showConfirm('Hapus Kategori?', 'Kategori yang sudah dipakai produk tidak bisa dihapus.', async () => {
+            showLoading('Menghapus...');
+            try {
+                await axios.delete(API_URL + 'master/categories&id=' + id, { headers: { Authorization: `Bearer ${token}` } });
+                if (activeCategory == id) setActiveCategory('all');
+                if (editingCategoryId == id) {
+                    setEditingCategoryId('');
+                    setNewCatName('');
+                }
+                showAlert('success', 'Berhasil', 'Kategori dihapus');
+                fetchMasterData();
+            } catch (error) {
+                showAlert('error', 'Gagal', error.response?.data?.message || 'Gagal menghapus kategori');
+            } finally {
+                hideLoading();
+            }
+        });
     };
 
     const openAddProduct = () => {
@@ -121,14 +166,14 @@ export default function Menu() {
     const handleAddVariant = async () => {
         if (!newVariant.name) return;
         try {
-            await axios.post(API_URL + 'master/products/variant', { 
-                product_id: prodForm.id, name: newVariant.name, price: newVariant.price 
+            await axios.post(API_URL + 'master/products/variant', {
+                product_id: prodForm.id, name: newVariant.name, price: newVariant.price
             }, { headers: { Authorization: `Bearer ${token}` } });
             setNewVariant({ name: '', price: '' });
             const updated = await axios.get(API_URL + 'master/products', { headers: { Authorization: `Bearer ${token}` } });
-            if(updated.data.status) {
+            if (updated.data.status) {
                 const p = updated.data.data.find(x => x.id === prodForm.id);
-                if(p) setProdForm(prev => ({...prev, variants: p.variants}));
+                if (p) setProdForm(prev => ({ ...prev, variants: p.variants }));
             }
         } catch (error) { showAlert('error', 'Gagal', 'Gagal tambah varian'); }
     };
@@ -136,21 +181,21 @@ export default function Menu() {
     const handleDeleteVariant = async (id) => {
         try {
             await axios.delete(API_URL + 'master/products/variant&id=' + id, { headers: { Authorization: `Bearer ${token}` } });
-            setProdForm(prev => ({...prev, variants: prev.variants.filter(v => v.id !== id)}));
+            setProdForm(prev => ({ ...prev, variants: prev.variants.filter(v => v.id !== id) }));
         } catch (error) { showAlert('error', 'Gagal', 'Gagal hapus varian'); }
     };
 
     const handleAddModifier = async () => {
         if (!newModifier.name) return;
         try {
-            await axios.post(API_URL + 'master/products/modifier', { 
-                product_id: prodForm.id, name: newModifier.name, price: newModifier.price 
+            await axios.post(API_URL + 'master/products/modifier', {
+                product_id: prodForm.id, name: newModifier.name, price: newModifier.price
             }, { headers: { Authorization: `Bearer ${token}` } });
             setNewModifier({ name: '', price: '' });
             const updated = await axios.get(API_URL + 'master/products', { headers: { Authorization: `Bearer ${token}` } });
-            if(updated.data.status) {
+            if (updated.data.status) {
                 const p = updated.data.data.find(x => x.id === prodForm.id);
-                if(p) setProdForm(prev => ({...prev, modifiers: p.modifiers}));
+                if (p) setProdForm(prev => ({ ...prev, modifiers: p.modifiers }));
             }
         } catch (error) { showAlert('error', 'Gagal', 'Gagal tambah modifier'); }
     };
@@ -158,7 +203,7 @@ export default function Menu() {
     const handleDeleteModifier = async (id) => {
         try {
             await axios.delete(API_URL + 'master/products/modifier&id=' + id, { headers: { Authorization: `Bearer ${token}` } });
-            setProdForm(prev => ({...prev, modifiers: prev.modifiers.filter(m => m.id !== id)}));
+            setProdForm(prev => ({ ...prev, modifiers: prev.modifiers.filter(m => m.id !== id) }));
         } catch (error) { showAlert('error', 'Gagal', 'Gagal hapus modifier'); }
     };
 
@@ -169,7 +214,7 @@ export default function Menu() {
         setRecipeTarget({ type, id: item.id, name: item.name });
         setShowRecipeModal(true);
         setNewRecipeItem({ ingredient_id: '', qty: '' });
-        setIngredientSearch(''); 
+        setIngredientSearch('');
         fetchRecipes(type, item.id);
     };
 
@@ -200,9 +245,9 @@ export default function Menu() {
                     type: recipeTarget.type, target_id: recipeTarget.id, ingredient_id: newRecipeItem.ingredient_id, qty: newRecipeItem.qty
                 }, { headers: { Authorization: `Bearer ${token}` } });
             }
-            
+
             setNewRecipeItem({ ingredient_id: '', qty: '' });
-            setIngredientSearch(''); 
+            setIngredientSearch('');
             fetchRecipes(recipeTarget.type, recipeTarget.id);
             fetchMasterData(); // Update status has_recipe
             showAlert('success', 'Sukses', 'Bahan ditambahkan');
@@ -238,7 +283,7 @@ export default function Menu() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div><h3 className="text-brand-darkest font-bold text-2xl">Manajemen Menu</h3><p className="text-gray-500 text-sm">Atur kategori, produk, dan resep (BOM).</p></div>
                 <div className="flex gap-2">
-                    <button onClick={() => setShowAddCat(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 font-medium text-sm"><Tag size={16} /> + Kategori</button>
+                    <button onClick={openCategoryModal} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 font-medium text-sm"><Tag size={16} /> + Kategori</button>
                     <button onClick={openAddProduct} className="flex items-center gap-2 px-4 py-2 bg-brand-primary text-white rounded-xl hover:bg-brand-dark font-medium text-sm shadow-lg shadow-brand-primary/20"><Box size={16} /> + Produk Baru</button>
                 </div>
             </div>
@@ -283,7 +328,7 @@ export default function Menu() {
                                 </div>
                                 <p className="text-xs text-gray-500 uppercase tracking-wide font-bold bg-gray-100 px-2 py-0.5 rounded w-fit">{recipeTarget.type}</p>
                             </div>
-                            <button onClick={() => setShowRecipeModal(false)} className="text-gray-400 hover:text-gray-600 bg-gray-100 p-1 rounded-lg"><X size={20}/></button>
+                            <button onClick={() => setShowRecipeModal(false)} className="text-gray-400 hover:text-gray-600 bg-gray-100 p-1 rounded-lg"><X size={20} /></button>
                         </div>
 
                         {/* Form Tambah Bahan */}
@@ -307,7 +352,7 @@ export default function Menu() {
                                     )}
                                 </div>
                                 <div className="w-28 relative flex items-center">
-                                    <input type="number" step="0.001" required placeholder="Jml" className="w-full border border-gray-200 rounded-lg pl-3 pr-8 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary text-center" value={newRecipeItem.qty} onChange={e => setNewRecipeItem({...newRecipeItem, qty: e.target.value})} />
+                                    <input type="number" step="0.001" required placeholder="Jml" className="w-full border border-gray-200 rounded-lg pl-3 pr-8 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary text-center" value={newRecipeItem.qty} onChange={e => setNewRecipeItem({ ...newRecipeItem, qty: e.target.value })} />
                                     {selectedIngredientDetail && (<span className="absolute right-2 text-xs text-gray-400 font-medium pointer-events-none">{selectedIngredientDetail.unit}</span>)}
                                 </div>
                                 <button onClick={addIngredient} className="bg-brand-primary text-white p-2 rounded-lg hover:bg-brand-dark shadow-md h-[38px] w-[38px] flex items-center justify-center shrink-0"><Plus size={18} /></button>
@@ -349,11 +394,34 @@ export default function Menu() {
 
             {showAddCat && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-                        <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-gray-800">Tambah Kategori</h3><button onClick={() => setShowAddCat(false)}><X size={20} className="text-gray-400"/></button></div>
-                        <form onSubmit={handleAddCategory}>
-                            <input type="text" className="w-full border border-gray-300 rounded-xl px-4 py-2 mb-4 focus:ring-2 focus:ring-brand-primary outline-none" placeholder="Contoh: Makanan Berat" value={newCatName} onChange={e => setNewCatName(e.target.value)} autoFocus required />
-                            <div className="flex gap-2 justify-end"><button type="button" onClick={() => setShowAddCat(false)} className="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded-xl">Batal</button><button className="px-4 py-2 bg-brand-primary text-white rounded-xl hover:bg-brand-dark">Simpan</button></div>
+                    <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl">
+                        <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-gray-800">Kelola Kategori</h3><button onClick={() => setShowAddCat(false)}><X size={20} className="text-gray-400" /></button></div>
+                        <form onSubmit={handleSaveCategory}>
+                            <div className="flex flex-col sm:flex-row gap-2 mb-4">
+                                <input type="text" className="flex-1 border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" placeholder="Contoh: Makanan Berat" value={newCatName} onChange={e => setNewCatName(e.target.value)} autoFocus required />
+                                <button className="px-4 py-2 bg-brand-primary text-white rounded-xl hover:bg-brand-dark">{editingCategoryId ? 'Update' : 'Tambah'}</button>
+                                {editingCategoryId && (
+                                    <button type="button" onClick={() => { setEditingCategoryId(''); setNewCatName(''); }} className="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded-xl">Batal Edit</button>
+                                )}
+                            </div>
+
+                            <div className="max-h-72 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-100 mb-4">
+                                {categories.length === 0 ? (
+                                    <div className="py-10 text-center text-sm text-gray-400">Belum ada kategori.</div>
+                                ) : categories.map(cat => (
+                                    <div key={cat.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                                        <div>
+                                            <p className="font-medium text-gray-800">{cat.name}</p>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <button type="button" onClick={() => handleEditCategory(cat)} className="p-2 text-gray-500 hover:text-brand-primary bg-gray-50 hover:bg-brand-bg rounded-lg" title="Edit Kategori"><Edit3 size={14} /></button>
+                                            <button type="button" onClick={() => handleDeleteCategory(cat.id)} className="p-2 text-gray-500 hover:text-red-500 bg-gray-50 hover:bg-red-50 rounded-lg" title="Hapus Kategori"><Trash2 size={14} /></button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="flex gap-2 justify-end"><button type="button" onClick={() => setShowAddCat(false)} className="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded-xl">Tutup</button></div>
                         </form>
                     </div>
                 </div>
@@ -365,7 +433,7 @@ export default function Menu() {
                     <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="font-bold text-lg text-gray-800">{isEditing ? 'Edit Produk' : 'Tambah Produk'}</h3>
-                            <button onClick={() => setShowProductModal(false)}><X size={20} className="text-gray-400"/></button>
+                            <button onClick={() => setShowProductModal(false)}><X size={20} className="text-gray-400" /></button>
                         </div>
 
                         {isEditing && (
@@ -378,13 +446,13 @@ export default function Menu() {
 
                         {activeTab === 'info' && (
                             <form onSubmit={handleProductSubmit} className="space-y-4">
-                                <input type="text" required className="w-full border rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" placeholder="Nama Menu" value={prodForm.name} onChange={e => setProdForm({...prodForm, name: e.target.value})} />
+                                <input type="text" required className="w-full border rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" placeholder="Nama Menu" value={prodForm.name} onChange={e => setProdForm({ ...prodForm, name: e.target.value })} />
                                 <div className="grid grid-cols-2 gap-4">
-                                    <input type="number" required className="w-full border rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" placeholder="Harga (Rp)" value={prodForm.price} onChange={e => setProdForm({...prodForm, price: e.target.value})} />
-                                    <select required className="w-full border rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary bg-white outline-none" value={prodForm.category_id} onChange={e => setProdForm({...prodForm, category_id: e.target.value})}><option value="">Kategori...</option>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                                    <input type="number" required className="w-full border rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" placeholder="Harga (Rp)" value={prodForm.price} onChange={e => setProdForm({ ...prodForm, price: e.target.value })} />
+                                    <select required className="w-full border rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary bg-white outline-none" value={prodForm.category_id} onChange={e => setProdForm({ ...prodForm, category_id: e.target.value })}><option value="">Kategori...</option>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
                                 </div>
-                                <input type="text" className="w-full border rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" placeholder="SKU (Opsional)" value={prodForm.sku} onChange={e => setProdForm({...prodForm, sku: e.target.value})} />
-                                <input type="text" className="w-full border rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" placeholder="URL Gambar" value={prodForm.image} onChange={e => setProdForm({...prodForm, image: e.target.value})} />
+                                <input type="text" className="w-full border rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" placeholder="SKU (Opsional)" value={prodForm.sku} onChange={e => setProdForm({ ...prodForm, sku: e.target.value })} />
+                                <input type="text" className="w-full border rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" placeholder="URL Gambar" value={prodForm.image} onChange={e => setProdForm({ ...prodForm, image: e.target.value })} />
                                 <div className="flex gap-2 justify-end mt-6"><button type="button" onClick={() => setShowProductModal(false)} className="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded-xl">Batal</button><button className="px-4 py-2 bg-brand-primary text-white rounded-xl hover:bg-brand-dark">Simpan</button></div>
                             </form>
                         )}
@@ -392,9 +460,9 @@ export default function Menu() {
                         {activeTab === 'variants' && (
                             <div className="space-y-4">
                                 <div className="flex gap-2">
-                                    <input type="text" placeholder="Nama (mis: Large)" className="flex-1 border rounded-lg px-3 py-2 text-sm" value={newVariant.name} onChange={e => setNewVariant({...newVariant, name: e.target.value})} />
-                                    <input type="number" placeholder="+Harga" className="w-24 border rounded-lg px-3 py-2 text-sm" value={newVariant.price} onChange={e => setNewVariant({...newVariant, price: e.target.value})} />
-                                    <button onClick={handleAddVariant} className="bg-green-500 text-white p-2 rounded-lg hover:bg-green-600"><Plus size={18}/></button>
+                                    <input type="text" placeholder="Nama (mis: Large)" className="flex-1 border rounded-lg px-3 py-2 text-sm" value={newVariant.name} onChange={e => setNewVariant({ ...newVariant, name: e.target.value })} />
+                                    <input type="number" placeholder="+Harga" className="w-24 border rounded-lg px-3 py-2 text-sm" value={newVariant.price} onChange={e => setNewVariant({ ...newVariant, price: e.target.value })} />
+                                    <button onClick={handleAddVariant} className="bg-green-500 text-white p-2 rounded-lg hover:bg-green-600"><Plus size={18} /></button>
                                 </div>
                                 <div className="space-y-2 max-h-48 overflow-y-auto">
                                     {prodForm.variants.length === 0 ? <p className="text-center text-gray-400 text-xs py-4">Belum ada varian.</p> : prodForm.variants.map(v => (
@@ -402,8 +470,8 @@ export default function Menu() {
                                             <div className="text-sm"><span className="font-bold text-gray-700">{v.name}</span> <span className="text-gray-500">+{parseInt(v.price_adjustment).toLocaleString()}</span></div>
                                             <div className="flex gap-1">
                                                 {/* TOMBOL RESEP VARIAN */}
-                                                <button onClick={() => openRecipe('variant', v)} className="text-blue-500 hover:text-blue-700 p-1 bg-blue-50 rounded" title="Resep Varian"><FlaskConical size={14}/></button>
-                                                <button onClick={() => handleDeleteVariant(v.id)} className="text-red-400 hover:text-red-600 p-1 bg-red-50 rounded"><Trash2 size={14}/></button>
+                                                <button onClick={() => openRecipe('variant', v)} className="text-blue-500 hover:text-blue-700 p-1 bg-blue-50 rounded" title="Resep Varian"><FlaskConical size={14} /></button>
+                                                <button onClick={() => handleDeleteVariant(v.id)} className="text-red-400 hover:text-red-600 p-1 bg-red-50 rounded"><Trash2 size={14} /></button>
                                             </div>
                                         </div>
                                     ))}
@@ -414,9 +482,9 @@ export default function Menu() {
                         {activeTab === 'modifiers' && (
                             <div className="space-y-4">
                                 <div className="flex gap-2">
-                                    <input type="text" placeholder="Nama (mis: Extra Keju)" className="flex-1 border rounded-lg px-3 py-2 text-sm" value={newModifier.name} onChange={e => setNewModifier({...newModifier, name: e.target.value})} />
-                                    <input type="number" placeholder="Harga" className="w-24 border rounded-lg px-3 py-2 text-sm" value={newModifier.price} onChange={e => setNewModifier({...newModifier, price: e.target.value})} />
-                                    <button onClick={handleAddModifier} className="bg-green-500 text-white p-2 rounded-lg hover:bg-green-600"><Plus size={18}/></button>
+                                    <input type="text" placeholder="Nama (mis: Extra Keju)" className="flex-1 border rounded-lg px-3 py-2 text-sm" value={newModifier.name} onChange={e => setNewModifier({ ...newModifier, name: e.target.value })} />
+                                    <input type="number" placeholder="Harga" className="w-24 border rounded-lg px-3 py-2 text-sm" value={newModifier.price} onChange={e => setNewModifier({ ...newModifier, price: e.target.value })} />
+                                    <button onClick={handleAddModifier} className="bg-green-500 text-white p-2 rounded-lg hover:bg-green-600"><Plus size={18} /></button>
                                 </div>
                                 <div className="space-y-2 max-h-48 overflow-y-auto">
                                     {prodForm.modifiers.length === 0 ? <p className="text-center text-gray-400 text-xs py-4">Belum ada topping/modifier.</p> : prodForm.modifiers.map(m => (
@@ -424,8 +492,8 @@ export default function Menu() {
                                             <div className="text-sm"><span className="font-bold text-gray-700">{m.name}</span> <span className="text-gray-500">+{parseInt(m.price).toLocaleString()}</span></div>
                                             <div className="flex gap-1">
                                                 {/* TOMBOL RESEP MODIFIER */}
-                                                <button onClick={() => openRecipe('modifier', m)} className="text-blue-500 hover:text-blue-700 p-1 bg-blue-50 rounded" title="Resep Topping"><FlaskConical size={14}/></button>
-                                                <button onClick={() => handleDeleteModifier(m.id)} className="text-red-400 hover:text-red-600 p-1 bg-red-50 rounded"><Trash2 size={14}/></button>
+                                                <button onClick={() => openRecipe('modifier', m)} className="text-blue-500 hover:text-blue-700 p-1 bg-blue-50 rounded" title="Resep Topping"><FlaskConical size={14} /></button>
+                                                <button onClick={() => handleDeleteModifier(m.id)} className="text-red-400 hover:text-red-600 p-1 bg-red-50 rounded"><Trash2 size={14} /></button>
                                             </div>
                                         </div>
                                     ))}

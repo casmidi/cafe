@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Camera, MapPin, RefreshCcw, Loader2, Clock, UserCheck, LogIn, Zap, X } from 'lucide-react';
+import { Camera, MapPin, RefreshCcw, Loader2, Clock, UserCheck, LogIn, Zap, X, Info } from 'lucide-react';
 import useUIStore from '../store/useUIStore';
 import { API_URL } from '../config';
 import { useNavigate } from 'react-router-dom';
@@ -115,7 +115,7 @@ export default function Attendance() {
                 } else {
                     setTodayStatus('none');
                 }
-                
+
                 console.log('[fetchHistory] Updated status:', todayLog ? (todayLog.clock_out ? 'checked_out' : 'checked_in') : 'none');
             }
         } catch (e) { console.error("Gagal fetch history:", e); }
@@ -278,7 +278,7 @@ export default function Attendance() {
                 {todayStatus !== 'checked_out' ? (
                     <>
                         {/* OPTION PILIHAN ABSEN: Foto vs Manual (SELALU TERLIHAT) */}
-                        <div className="flex gap-3 justify-center mb-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                             <button
                                 onClick={startCamera}
                                 disabled={!hasFaceId || !isModelLoaded}
@@ -288,11 +288,23 @@ export default function Attendance() {
                                 <Camera size={20} /> {todayStatus === 'none' ? 'Absen Foto' : 'Pulang Foto'}
                             </button>
                             <button
-                                onClick={() => setShowManualModal(true)}
+                                onClick={() => {
+                                    setManualReason('');
+                                    setShowManualModal(true);
+                                }}
                                 className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
                             >
-                                <Zap size={20} /> {todayStatus === 'none' ? 'Absen Manual' : 'Pulang Manual'}
+                                <Zap size={20} /> {todayStatus === 'none' ? 'Absen Manual (Tanpa Foto)' : 'Pulang Manual (Tanpa Foto)'}
                             </button>
+                        </div>
+
+                        <div className="mb-6 text-left bg-blue-50 border border-blue-100 rounded-xl p-3">
+                            <p className="text-xs sm:text-sm text-blue-800 flex items-start gap-2">
+                                <Info size={16} className="mt-0.5 shrink-0" />
+                                <span>
+                                    Absensi manual ada di tombol biru. Posisi tombolnya di sebelah tombol foto pada layar besar, dan berada di bawah tombol foto pada layar mobile.
+                                </span>
+                            </p>
                         </div>
 
                         {/* CAMERA VIEW - HANYA TAMPIL SAAT CAMERA DIBUKA */}

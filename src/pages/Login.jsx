@@ -5,11 +5,31 @@ import { Lock, User, Loader2, AlertCircle } from 'lucide-react';
 import { jwtDecode } from 'jwt-decode';
 import useUIStore from '../store/useUIStore';
 import { API_URL } from '../config';
+import { FALLBACK_LOGO_URL, normalizeLogoUrl } from '../utils/logoUrl';
 
 export default function Login() {
     const [formData, setFormData] = useState({ username: '', password: '' });
     const navigate = useNavigate();
     const { showLoading, hideLoading, showAlert, appSettings } = useUIStore();
+
+    // Derive logo URL: prefer appSettings, fallback to cached, then default
+    const getLogoUrl = () => {
+        if (appSettings?.logo_url) return appSettings.logo_url;
+
+        const cached = localStorage.getItem('cachedOutletInfo');
+        if (cached) {
+            try {
+                const data = JSON.parse(cached);
+                return data.logo_url || FALLBACK_LOGO_URL;
+            } catch (e) {
+                return FALLBACK_LOGO_URL;
+            }
+        }
+
+        return FALLBACK_LOGO_URL;
+    };
+
+    const logoUrl = getLogoUrl();
 
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -58,9 +78,13 @@ export default function Login() {
             <div className="bg-white p-8 rounded-3xl shadow-2xl shadow-brand-accent/20 w-full max-w-md border border-white">
                 <div className="text-center mb-8">
                     <img
-                        src={appSettings?.logo_url || "/taskora-logo.png?v=86"}
+                        src={logoUrl}
                         alt="Logo"
                         className="h-20 mx-auto mb-4 object-contain"
+                        onError={(e) => {
+                            e.currentTarget.onerror = null;
+                            e.currentTarget.src = FALLBACK_LOGO_URL;
+                        }}
                     />
                     <p className="text-gray-400 text-sm font-medium">Silakan login untuk memulai shift</p>
                 </div>

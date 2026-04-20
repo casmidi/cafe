@@ -4,6 +4,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { User, Phone, Mail, Lock, Loader2, CheckCircle } from 'lucide-react';
 import { API_URL } from '../config';
 import useUIStore from '../store/useUIStore';
+import { FALLBACK_LOGO_URL } from '../utils/logoUrl';
 
 export default function CustomerRegister() {
     const [formData, setFormData] = useState({ name: '', phone: '', email: '', password: '' });
@@ -35,9 +36,13 @@ export default function CustomerRegister() {
                 <div className="absolute top-0 left-0 w-full h-2 bg-brand-primary"></div>
                 <div className="mb-6 flex justify-center">
                     <img
-                        src={appSettings?.logo_url || "/taskora-logo.png?v=86"}
+                        src={appSettings?.logo_url || FALLBACK_LOGO_URL}
                         alt="Logo"
                         className="h-12 w-auto object-contain"
+                        onError={(e) => {
+                            e.currentTarget.onerror = null;
+                            e.currentTarget.src = FALLBACK_LOGO_URL;
+                        }}
                     />
                 </div>
                 <h2 className="text-2xl font-bold text-brand-darkest mb-2 mt-2">Daftar Member</h2>

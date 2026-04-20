@@ -3,16 +3,17 @@ import axios from 'axios';
 import { Save, Building, Receipt, Percent, Printer, Star, Search, Gift, Image as ImageIcon, Upload, Bluetooth, CheckCircle, AlertTriangle, Clock } from 'lucide-react';
 import useUIStore from '../store/useUIStore';
 import { API_URL } from '../config';
-import { BluetoothPrinter } from '../utils/bluetoothPrinter'; 
+import { BluetoothPrinter } from '../utils/bluetoothPrinter';
+import { FALLBACK_LOGO_URL, normalizeLogoUrl, withCacheBuster } from '../utils/logoUrl';
 
 export default function Settings() {
-    const [activeTab, setActiveTab] = useState('general'); 
+    const [activeTab, setActiveTab] = useState('general');
     const [formData, setFormData] = useState({
         name: '', phone: '', address: '', tax_rate: 0, service_charge_rate: 0, receipt_footer: '',
         point_conversion_rate: 10000, point_value_idr: 500,
         late_penalty_per_minute: 1000 // Default
     });
-    
+
     const [logoFile, setLogoFile] = useState(null);
     const [logoPreview, setLogoPreview] = useState(null);
     const [printerSize, setPrinterSize] = useState(localStorage.getItem('printerSize') || '58mm');
@@ -20,8 +21,13 @@ export default function Settings() {
     const [printerName, setPrinterName] = useState('Belum Terhubung');
     const [isPrinterConnected, setIsPrinterConnected] = useState(false);
 
-    const { showLoading, hideLoading, showAlert, setAppSettings } = useUIStore();
+    const { showLoading, hideLoading, showAlert, setAppSettings, appSettings } = useUIStore();
     const token = localStorage.getItem('token');
+
+    useEffect(() => {
+        // Tampilkan logo aktif segera saat halaman settings dibuka pertama kali.
+        setLogoPreview(withCacheBuster(normalizeLogoUrl(appSettings?.logo_url || FALLBACK_LOGO_URL)));
+    }, [appSettings?.logo_url]);
 
     useEffect(() => {
         fetchSettings();
@@ -40,15 +46,20 @@ export default function Settings() {
             if (res.data.status) {
                 const data = res.data.data;
                 setFormData(data);
-                if (data.logo_url) setLogoPreview(`${data.logo_url}?t=${new Date().getTime()}`);
+                const normalizedLogoUrl = normalizeLogoUrl(data.logo_url || appSettings?.logo_url || FALLBACK_LOGO_URL);
+                setLogoPreview(withCacheBuster(normalizedLogoUrl));
                 localStorage.setItem('outletSettings', JSON.stringify(data));
+                setAppSettings({
+                    name: data.name,
+                    logo_url: normalizedLogoUrl
+                });
             }
         } catch (error) { console.error(error); } finally { hideLoading(); }
     };
 
     const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
     const handleFileChange = (e) => { const file = e.target.files[0]; if (file) { setLogoFile(file); setLogoPreview(URL.createObjectURL(file)); } };
-    
+
     const handleSave = async (e) => {
         e.preventDefault();
         showLoading('Menyimpan...');
@@ -62,10 +73,9 @@ export default function Settings() {
                 const newData = res.data.data;
                 localStorage.setItem('outletSettings', JSON.stringify(newData));
                 localStorage.setItem('printerSize', printerSize);
-                if (newData.logo_url) {
-                    setAppSettings({ name: newData.name, logo_url: newData.logo_url });
-                    setLogoPreview(`${newData.logo_url}?t=${new Date().getTime()}`);
-                }
+                const normalizedLogoUrl = normalizeLogoUrl(newData.logo_url || FALLBACK_LOGO_URL);
+                setAppSettings({ name: newData.name, logo_url: normalizedLogoUrl });
+                setLogoPreview(withCacheBuster(normalizedLogoUrl));
                 setLogoFile(null);
                 showAlert('success', 'Berhasil', 'Pengaturan disimpan');
             }
@@ -98,7 +108,7 @@ export default function Settings() {
             showAlert('success', 'Terkirim', 'Data dikirim ke printer.');
         } catch (error) {
             showAlert('error', 'Gagal Print', error.message);
-            setIsPrinterConnected(false); 
+            setIsPrinterConnected(false);
         }
     };
 
@@ -121,7 +131,16 @@ export default function Settings() {
                 <form onSubmit={handleSave} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4 flex flex-col items-center">
                         <h4 className="font-bold text-gray-800 mb-2 flex items-center gap-2 w-full"><ImageIcon size={20} className="text-brand-primary" /> Logo Outlet</h4>
-                        <div className="w-40 h-40 bg-gray-50 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative group transition-all hover:border-brand-primary bg-white">{logoPreview ? (<img src={logoPreview} alt="Logo Preview" className="w-full h-full object-contain p-2" />) : (<div className="text-center text-gray-400"><Upload size={32} className="mx-auto mb-2 opacity-50"/><span className="text-xs font-medium">Upload Logo</span></div>)}<input type="file" accept="image/*" onChange={handleFileChange} className="absolute inset-0 opacity-0 cursor-pointer z-10" /><div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none font-bold text-sm z-0">Ganti Logo</div></div>
+                        <div className="w-40 h-40 bg-gray-50 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative group transition-all hover:border-brand-primary bg-white">{logoPreview ? (<img src={logoPreview} alt="Logo Preview" className="w-full h-full object-contain p-2" onError={(e) => { e.currentTarget.onerror = null; const fallback = withCacheBuster(FALLBACK_LOGO_URL); e.currentTarget.src = fallback; setLogoPreview(fallback); }} />) : (<div className="text-center text-gray-400"><Upload size={32} className="mx-auto mb-2 opacity-50" /><span className="text-xs font-medium">Upload Logo</span></div>)}<input type="file" accept="image/*" onChange={handleFileChange} className="absolute inset-0 opacity-0 cursor-pointer z-10" /><div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none font-bold text-sm z-0">Ganti Logo</div></div>
+                        <div className="mt-3 text-xs font-semibold">
+                            {logoFile ? (
+                                <span className="inline-flex items-center px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Preview logo baru (belum disimpan)</span>
+                            ) : (logoPreview && !logoPreview.includes(FALLBACK_LOGO_URL.split('?')[0]) ? (
+                                <span className="inline-flex items-center px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Logo aktif saat ini</span>
+                            ) : (
+                                <span className="inline-flex items-center px-3 py-1 rounded-full bg-gray-100 text-gray-600 border border-gray-200">Logo default aktif</span>
+                            ))}
+                        </div>
                     </div>
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4 lg:col-span-2">
                         <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Building size={20} className="text-brand-primary" /> Profil Outlet</h4>
@@ -135,19 +154,19 @@ export default function Settings() {
                             <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Belanja Per 1 Poin (Rp)</label><input type="number" name="point_conversion_rate" className="w-full border border-gray-200 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-brand-primary" value={formData.point_conversion_rate} onChange={handleChange} /></div>
                             <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nilai 1 Poin (Rp)</label><input type="number" name="point_value_idr" className="w-full border border-gray-200 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-brand-primary" value={formData.point_value_idr} onChange={handleChange} /></div>
                         </div>
-                        
+
                         {/* SECTION DENDA KETERLAMBATAN */}
                         <div className="mt-4 pt-4 border-t border-gray-50">
-                             <label className="block text-xs font-bold text-red-500 uppercase mb-1 flex items-center gap-1"><Clock size={14}/> Denda Keterlambatan (Per Menit)</label>
-                             <div className="relative max-w-xs">
+                            <label className="block text-xs font-bold text-red-500 uppercase mb-1 flex items-center gap-1"><Clock size={14} /> Denda Keterlambatan (Per Menit)</label>
+                            <div className="relative max-w-xs">
                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">Rp</span>
-                                <input 
-                                    type="number" name="late_penalty_per_minute" 
-                                    className="w-full border border-red-100 bg-red-50 rounded-xl pl-9 pr-4 py-2 outline-none focus:ring-2 focus:ring-red-500 text-red-700 font-bold" 
-                                    value={formData.late_penalty_per_minute} onChange={handleChange} 
+                                <input
+                                    type="number" name="late_penalty_per_minute"
+                                    className="w-full border border-red-100 bg-red-50 rounded-xl pl-9 pr-4 py-2 outline-none focus:ring-2 focus:ring-red-500 text-red-700 font-bold"
+                                    value={formData.late_penalty_per_minute} onChange={handleChange}
                                 />
-                             </div>
-                             <p className="text-[10px] text-gray-400 mt-1">Dipotong otomatis dari gaji jika karyawan absen terlambat dari jam shift.</p>
+                            </div>
+                            <p className="text-[10px] text-gray-400 mt-1">Dipotong otomatis dari gaji jika karyawan absen terlambat dari jam shift.</p>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-50"><div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Catatan Kaki Struk</label><input type="text" name="receipt_footer" className="w-full border border-gray-200 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-brand-primary" value={formData.receipt_footer} onChange={handleChange} /></div></div>
@@ -176,7 +195,7 @@ export default function Settings() {
                         <div className={`p-4 rounded-full mb-4 transition-colors ${isPrinterConnected ? 'bg-green-100 text-green-600' : 'bg-gray-200 text-gray-400'}`}>
                             <Bluetooth size={48} />
                         </div>
-                        
+
                         <h5 className="font-bold text-lg text-gray-800 mb-1">{printerName}</h5>
                         <p className={`text-sm font-medium mb-6 ${isPrinterConnected ? 'text-green-600' : 'text-red-500'}`}>
                             Status: {isPrinterConnected ? 'Terhubung' : 'Terputus'}
@@ -184,14 +203,14 @@ export default function Settings() {
 
                         <div className="flex gap-4">
                             {!isPrinterConnected ? (
-                                <button 
+                                <button
                                     onClick={handleConnectPrinter}
                                     className="px-6 py-2 bg-brand-primary text-white font-bold rounded-xl shadow-lg hover:bg-brand-dark active:scale-95 transition-transform flex items-center gap-2"
                                 >
                                     <Search size={18} /> Cari & Hubungkan
                                 </button>
                             ) : (
-                                <button 
+                                <button
                                     onClick={handleTestPrint}
                                     className="px-6 py-2 bg-gray-800 text-white font-bold rounded-xl shadow-lg hover:bg-gray-900 active:scale-95 transition-transform flex items-center gap-2"
                                 >
@@ -205,11 +224,11 @@ export default function Settings() {
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Ukuran Kertas</label>
                         <div className="flex gap-4">
                             <label className={`flex-1 border rounded-xl p-3 cursor-pointer flex items-center gap-3 transition-all ${printerSize === '58mm' ? 'border-brand-primary bg-brand-bg text-brand-darkest ring-1 ring-brand-primary' : 'border-gray-200'}`}>
-                                <input type="radio" name="printer" value="58mm" checked={printerSize === '58mm'} onChange={(e) => setPrinterSize(e.target.value)} className="accent-brand-primary w-4 h-4"/>
+                                <input type="radio" name="printer" value="58mm" checked={printerSize === '58mm'} onChange={(e) => setPrinterSize(e.target.value)} className="accent-brand-primary w-4 h-4" />
                                 <span className="font-bold text-sm">58mm (Standard Mobile)</span>
                             </label>
                             <label className={`flex-1 border rounded-xl p-3 cursor-pointer flex items-center gap-3 transition-all ${printerSize === '80mm' ? 'border-brand-primary bg-brand-bg text-brand-darkest ring-1 ring-brand-primary' : 'border-gray-200'}`}>
-                                <input type="radio" name="printer" value="80mm" checked={printerSize === '80mm'} onChange={(e) => setPrinterSize(e.target.value)} className="accent-brand-primary w-4 h-4"/>
+                                <input type="radio" name="printer" value="80mm" checked={printerSize === '80mm'} onChange={(e) => setPrinterSize(e.target.value)} className="accent-brand-primary w-4 h-4" />
                                 <span className="font-bold text-sm">80mm (Standard Desktop)</span>
                             </label>
                         </div>
