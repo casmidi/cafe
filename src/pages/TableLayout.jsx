@@ -13,7 +13,7 @@ const MAP_PADDING = 24;
 const sortTablesByNumber = (inputTables) => [...inputTables].sort((firstTable, secondTable) => String(firstTable.table_number).localeCompare(String(secondTable.table_number), undefined, {
     numeric: true,
     sensitivity: 'base',
-});
+}));
 
 export default function TableLayout() {
     const [tables, setTables] = useState([]);
@@ -449,35 +449,63 @@ export default function TableLayout() {
                             )}
 
                             {displayedTables.map((table) => (
-                                <motion.div
-                                    key={`${table.id}-${isEditing ? 'edit' : 'view'}`}
-                                    drag={isEditing}
-                                    dragMomentum={false}
-                                    dragElastic={0}
-                                    onDragStart={() => setDragPreview({ id: table.id, position_x: Number(table.position_x) || 0, position_y: Number(table.position_y) || 0 })}
-                                    onDrag={(e) => handleDrag(e, table.id)}
-                                    onDragEnd={(e) => handleDragEnd(e, table.id)}
-                                    whileHover={{ scale: 1.05 }}
-                                    whileDrag={{ scale: 1.1, zIndex: 50, opacity: 0.8, cursor: 'grabbing' }}
-                                    animate={isEditing ? undefined : { x: 0, y: 0, scale: 1 }}
-                                    transition={isEditing ? undefined : { duration: 0 }}
-                                    style={{
-                                        left: `${Number(table.position_x) || 0}px`,
-                                        top: `${Number(table.position_y) || 0}px`,
-                                    }}
-                                    className={`absolute w-24 h-24 rounded-2xl shadow-md flex flex-col items-center justify-center border-2 transition-all ${getStatusColor(table.status)} ${isEditing ? 'cursor-grab ring-2 ring-brand-primary/50 ring-offset-2' : 'cursor-pointer'}`}
-                                    onClick={() => !isEditing && handleShowQR(table)}
-                                >
-                                    <div className="absolute top-2 left-2 w-5 h-5 rounded-full bg-brand-primary/15 border border-brand-primary/25 text-brand-darkest flex items-center justify-center shadow-sm">
-                                        <Utensils size={10} />
-                                    </div>
-                                    <span className="text-2xl font-bold mb-1">{table.table_number}</span>
+                                isEditing ? (
+                                    <motion.div
+                                        key={`${table.id}-edit`}
+                                        drag
+                                        dragMomentum={false}
+                                        dragElastic={0}
+                                        onDragStart={() => setDragPreview({ id: table.id, position_x: Number(table.position_x) || 0, position_y: Number(table.position_y) || 0 })}
+                                        onDrag={(e) => handleDrag(e, table.id)}
+                                        onDragEnd={(e) => handleDragEnd(e, table.id)}
+                                        whileHover={{ scale: 1.05 }}
+                                        whileDrag={{ scale: 1.1, zIndex: 50, opacity: 0.8, cursor: 'grabbing' }}
+                                        style={{
+                                            left: `${Number(table.position_x) || 0}px`,
+                                            top: `${Number(table.position_y) || 0}px`,
+                                        }}
+                                        className={`absolute w-24 h-24 rounded-2xl shadow-md flex flex-col items-center justify-center border-2 transition-all ${getStatusColor(table.status)} cursor-grab ring-2 ring-brand-primary/50 ring-offset-2`}
+                                    >
+                                        <div className="absolute top-2 left-2 w-5 h-5 rounded-full bg-brand-primary/15 border border-brand-primary/25 text-brand-darkest flex items-center justify-center shadow-sm">
+                                            <Utensils size={10} />
+                                        </div>
+                                        <span className="text-2xl font-bold mb-1">{table.table_number}</span>
 
-                                    {table.status === 'occupied' ? (
-                                        <div className="flex flex-col items-center">
-                                            <span className="text-[10px] font-bold uppercase">Terisi</span>
-                                            {/* Tombol Clear (Hanya muncul jika terisi & tidak edit) */}
-                                            {!isEditing && (
+                                        {table.status === 'occupied' ? (
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[10px] font-bold uppercase">Terisi</span>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-1 text-[10px] opacity-60 bg-black/5 px-2 py-0.5 rounded-full">
+                                                <Users size={10} /> {table.capacity}
+                                            </div>
+                                        )}
+
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); handleDeleteTable(table.id); }}
+                                            className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-700 shadow-sm z-10"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    </motion.div>
+                                ) : (
+                                    <div
+                                        key={`${table.id}-view`}
+                                        style={{
+                                            left: `${Number(table.position_x) || 0}px`,
+                                            top: `${Number(table.position_y) || 0}px`,
+                                        }}
+                                        className={`absolute w-24 h-24 rounded-2xl shadow-md flex flex-col items-center justify-center border-2 transition-all ${getStatusColor(table.status)} cursor-pointer`}
+                                        onClick={() => handleShowQR(table)}
+                                    >
+                                        <div className="absolute top-2 left-2 w-5 h-5 rounded-full bg-brand-primary/15 border border-brand-primary/25 text-brand-darkest flex items-center justify-center shadow-sm">
+                                            <Utensils size={10} />
+                                        </div>
+                                        <span className="text-2xl font-bold mb-1">{table.table_number}</span>
+
+                                        {table.status === 'occupied' ? (
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[10px] font-bold uppercase">Terisi</span>
                                                 <button
                                                     onClick={(e) => { e.stopPropagation(); handleClearTable(table); }}
                                                     className="mt-1 px-2 py-0.5 bg-white/80 rounded-full text-[9px] font-bold text-red-600 hover:bg-white shadow-sm flex items-center gap-1"
@@ -485,29 +513,16 @@ export default function TableLayout() {
                                                 >
                                                     <CheckCircle size={8} /> Selesai
                                                 </button>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="flex items-center gap-1 text-[10px] opacity-60 bg-black/5 px-2 py-0.5 rounded-full">
-                                            <Users size={10} /> {table.capacity}
-                                        </div>
-                                    )}
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-1 text-[10px] opacity-60 bg-black/5 px-2 py-0.5 rounded-full">
+                                                <Users size={10} /> {table.capacity}
+                                            </div>
+                                        )}
 
-                                    {/* Tombol Hapus (Mode Edit) */}
-                                    {isEditing && (
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleDeleteTable(table.id); }}
-                                            className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-700 shadow-sm z-10"
-                                        >
-                                            <X size={12} />
-                                        </button>
-                                    )}
-
-                                    {/* Status Indicator Dot */}
-                                    {!isEditing && (
                                         <div className={`absolute top-2 right-2 w-2 h-2 rounded-full ${table.status === 'occupied' ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}></div>
-                                    )}
-                                </motion.div>
+                                    </div>
+                                )
                             ))}
 
                             {isEditing && dragPreview && (

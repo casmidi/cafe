@@ -169,6 +169,9 @@ function App() {
           <Route path="/receiving" element={<ProtectedRoute><Receiving /></ProtectedRoute>} />
           <Route path="/expenses" element={<ProtectedRoute><Expenses /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+          <Route path="/reports/sales-period" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+          <Route path="/reports/cashier" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+          <Route path="/reports/top-menu" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
           <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
           <Route path="/menu" element={<ProtectedRoute><Menu /></ProtectedRoute>} />
           <Route path="/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />

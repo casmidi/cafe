@@ -1,312 +1,690 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import { Calendar, TrendingUp, Package, DollarSign, ArrowUpRight, ArrowDownRight, Filter, ChevronLeft, ChevronRight, Wallet } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { Calendar, BarChart3, User, UtensilsCrossed, Printer, FileSpreadsheet, FileDown, Filter } from 'lucide-react';
 import useUIStore from '../store/useUIStore';
 import { API_URL } from '../config';
 
+const REPORT_ROUTES = {
+    sales: '/reports/sales-period',
+    cashier: '/reports/cashier',
+    topMenu: '/reports/top-menu',
+};
+
+const SHIFT_OPTIONS = [
+    { value: 'all', label: 'Semua Shift' },
+    { value: 'A', label: 'Shift A (06:00 - 13:59)' },
+    { value: 'B', label: 'Shift B (14:00 - 21:59)' },
+    { value: 'C', label: 'Shift C (22:00 - 05:59)' },
+];
+
+const toDateInputValue = (date) => date.toISOString().split('T')[0];
+
+const getShiftLabelFromDateTime = (dateTimeValue) => {
+    if (!dateTimeValue) return 'N/A';
+
+    const date = new Date(dateTimeValue);
+    const hour = date.getHours();
+
+    if (hour >= 6 && hour < 14) return 'A';
+    if (hour >= 14 && hour < 22) return 'B';
+    return 'C';
+};
+
+const formatCurrency = (value) => `Rp ${Number(value || 0).toLocaleString('id-ID')}`;
+
+const formatDateTime = (value) => {
+    if (!value) return '-';
+    return new Date(value).toLocaleString('id-ID');
+};
+
+const formatDateOnly = (value) => {
+    if (!value) return '-';
+
+    const date = new Date(value);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+
+    return `${day}-${month}-${year}`;
+};
+
+const formatDateInputDisplay = (value) => {
+    if (!value) return '-- -- ----';
+
+    const [year, month, day] = String(value).split('-');
+    if (!year || !month || !day) return value;
+
+    return `${day.padStart(2, '0')}-${month.padStart(2, '0')}-${year}`;
+};
+
+const escapeHtml = (value) => String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+
+function DateDisplayField({ value, onChange }) {
+    const inputRef = useRef(null);
+
+    const openPicker = () => {
+        if (!inputRef.current) return;
+
+        if (typeof inputRef.current.showPicker === 'function') {
+            inputRef.current.showPicker();
+            return;
+        }
+
+        inputRef.current.click();
+    };
+
+    return (
+        <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-700 min-w-[92px]">{formatDateInputDisplay(value)}</span>
+            <button
+                type="button"
+                onClick={openPicker}
+                className="w-7 h-7 rounded-md hover:bg-gray-100 text-gray-500 flex items-center justify-center transition-colors"
+                aria-label="Pilih tanggal"
+            >
+                <Calendar size={15} />
+            </button>
+            <input
+                ref={inputRef}
+                type="date"
+                value={value}
+                onChange={onChange}
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+            />
+        </div>
+    );
+}
+
 export default function Reports() {
-    const [activeTab, setActiveTab] = useState('sales'); 
-    const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]); 
-    const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]); 
-    
-    // Data State
-    const [salesData, setSalesData] = useState({ daily: [], top_products: [] });
-    const [stockLogs, setStockLogs] = useState([]);
-    const [profitData, setProfitData] = useState({ 
-        revenue: 0, 
-        cogs: 0, 
-        gross_profit: 0, 
-        expenses: { payroll: 0, operational: 0, total: 0 }, // Struktur data lengkap dari backend
-        net_profit: 0,
-        expense_purchasing: 0 
-    });
+    const location = useLocation();
+    const navigate = useNavigate();
+    const { showLoading, hideLoading, showAlert } = useUIStore();
 
-    // Pagination State untuk Stock Logs
-    const [stockPage, setStockPage] = useState(1);
-    const [stockTotalPages, setStockTotalPages] = useState(1);
-
-    const { showLoading, hideLoading } = useUIStore();
     const token = localStorage.getItem('token');
 
-    useEffect(() => {
-        setStockPage(1); // Reset page saat tab/tanggal berubah
-        fetchData();
-    }, [activeTab, startDate, endDate]);
+    const [salesStartDate, setSalesStartDate] = useState(toDateInputValue(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
+    const [salesEndDate, setSalesEndDate] = useState(toDateInputValue(new Date()));
+    const [cashierStartDate, setCashierStartDate] = useState(toDateInputValue(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
+    const [cashierEndDate, setCashierEndDate] = useState(toDateInputValue(new Date()));
+    const [selectedShift, setSelectedShift] = useState('all');
+
+    const [salesData, setSalesData] = useState({ daily: [], top_products: [] });
+    const [cashierRawData, setCashierRawData] = useState([]);
+    const [topMenuData, setTopMenuData] = useState([]);
+
+    const activeReport = useMemo(() => {
+        if (location.pathname === REPORT_ROUTES.cashier) return 'cashier';
+        if (location.pathname === REPORT_ROUTES.topMenu) return 'topMenu';
+        return 'sales';
+    }, [location.pathname]);
 
     useEffect(() => {
-        if (activeTab === 'stock') fetchStockLogs();
-    }, [stockPage]); 
+        if (location.pathname === '/reports') {
+            navigate(REPORT_ROUTES.sales, { replace: true });
+        }
+    }, [location.pathname, navigate]);
 
-    const fetchData = async () => {
-        showLoading('Menganalisa data...');
+    useEffect(() => {
+        if (!token) return;
+
+        if (activeReport === 'sales') {
+            fetchSalesReport();
+            return;
+        }
+
+        if (activeReport === 'cashier') {
+            fetchCashierReport();
+            return;
+        }
+
+        fetchTopMenuReport();
+    }, [activeReport, salesStartDate, salesEndDate, cashierStartDate, cashierEndDate, token]);
+
+    const fetchSalesReport = async () => {
+        showLoading('Memuat laporan penjualan...');
+
         try {
-            const config = { headers: { Authorization: `Bearer ${token}` } };
-            const queryParams = `&start_date=${startDate}&end_date=${endDate}`;
+            const response = await axios.get(`${API_URL}reports/sales&start_date=${salesStartDate}&end_date=${salesEndDate}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
 
-            if (activeTab === 'sales') {
-                const res = await axios.get(API_URL + 'reports/sales' + queryParams, config);
-                if(res.data.status) setSalesData(res.data.data);
-            } else if (activeTab === 'stock') {
-                await fetchStockLogs(); 
-            } else if (activeTab === 'profit') {
-                const res = await axios.get(API_URL + 'reports/profit' + queryParams, config);
-                if(res.data.status) setProfitData(res.data.data);
+            if (response.data?.status) {
+                setSalesData(response.data.data || { daily: [], top_products: [] });
+            } else {
+                setSalesData({ daily: [], top_products: [] });
             }
         } catch (error) {
             console.error(error);
+            showAlert('error', 'Gagal', 'Gagal memuat laporan penjualan.');
         } finally {
             hideLoading();
         }
     };
 
-    const fetchStockLogs = async () => {
+    const fetchCashierReport = async () => {
+        showLoading('Memuat laporan per kasir...');
+
         try {
-            const config = { headers: { Authorization: `Bearer ${token}` } };
-            const queryParams = `&start_date=${startDate}&end_date=${endDate}&page=${stockPage}&limit=10`;
-            const res = await axios.get(API_URL + 'reports/stock' + queryParams, config);
-            if(res.data.status) {
-                setStockLogs(res.data.data);
-                setStockTotalPages(res.data.pagination.total_pages);
+            const response = await axios.get(`${API_URL}shift/history`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+
+            if (response.data?.status) {
+                setCashierRawData(response.data.data || []);
+            } else {
+                setCashierRawData([]);
             }
-        } catch(error) { console.error(error); }
+        } catch (error) {
+            console.error(error);
+            showAlert('error', 'Gagal', 'Gagal memuat laporan per kasir.');
+        } finally {
+            hideLoading();
+        }
     };
 
-    const SalesView = () => (
-        <div className="space-y-6">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <h4 className="font-bold text-gray-800 mb-6">Grafik Omzet Harian</h4>
-                <div className="h-[300px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={salesData.daily}>
-                            <defs>
-                                <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#D92929" stopOpacity={0.2}/>
-                                    <stop offset="95%" stopColor="#D92929" stopOpacity={0}/>
-                                </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                            <XAxis dataKey="date" tick={{fontSize: 12}} tickFormatter={(val) => new Date(val).getDate()} />
-                            <YAxis tick={{fontSize: 12}} tickFormatter={(val) => `${val/1000}k`} />
-                            <Tooltip formatter={(val) => `Rp ${val.toLocaleString()}`} />
-                            <Area type="monotone" dataKey="total" stroke="#D92929" fillOpacity={1} fill="url(#colorTotal)" />
-                        </AreaChart>
-                    </ResponsiveContainer>
-                </div>
-            </div>
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <h4 className="font-bold text-gray-800 mb-4">5 Menu Terlaris</h4>
-                <div className="space-y-4">
-                    {salesData.top_products.map((item, idx) => (
-                        <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                            <div className="flex items-center gap-3">
-                                <span className="font-bold text-brand-primary w-6 text-center">#{idx + 1}</span>
-                                <span className="font-medium text-gray-700">{item.name}</span>
-                            </div>
-                            <div className="text-right">
-                                <p className="font-bold text-gray-800">{item.qty_sold} terjual</p>
-                                <p className="text-xs text-gray-500">Omzet: Rp {parseInt(item.revenue).toLocaleString()}</p>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
+    const fetchTopMenuReport = async () => {
+        showLoading('Memuat laporan menu terlaris...');
 
-    const ProfitView = () => {
-        // Fallback agar tidak crash jika data expenses belum ready
-        const expenses = profitData.expenses || { payroll: 0, operational: 0, total: 0 };
-        
-        return (
-            <div className="space-y-6">
-                {/* Kartu Utama */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-2xl border border-blue-200">
-                        <p className="text-blue-600 font-bold mb-1 flex items-center gap-2"><ArrowUpRight size={18}/> Pendapatan (Revenue)</p>
-                        <h3 className="text-3xl font-extrabold text-blue-900 mt-2">Rp {parseInt(profitData.revenue).toLocaleString('id-ID')}</h3>
-                        <p className="text-xs text-blue-500 mt-2">Total penjualan kotor dari transaksi</p>
-                    </div>
-                    
-                    <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-6 rounded-2xl border border-orange-200">
-                        <p className="text-orange-600 font-bold mb-1 flex items-center gap-2"><ArrowDownRight size={18}/> Beban Pokok (HPP)</p>
-                        <h3 className="text-3xl font-extrabold text-orange-900 mt-2">Rp {parseInt(profitData.cogs).toLocaleString('id-ID')}</h3>
-                        <p className="text-xs text-orange-500 mt-2">Modal bahan baku (Resep)</p>
-                    </div>
+        try {
+            const [menuPerfRes, productsRes] = await Promise.all([
+                axios.get(`${API_URL}analytics/menu`, { headers: { Authorization: `Bearer ${token}` } }),
+                axios.get(`${API_URL}master/products`, { headers: { Authorization: `Bearer ${token}` } }),
+            ]);
 
-                    <div className={`p-6 rounded-2xl border ${profitData.net_profit >= 0 ? 'bg-gradient-to-br from-green-50 to-green-100 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                        <p className={`${profitData.net_profit >= 0 ? 'text-green-600' : 'text-red-600'} font-bold mb-1 flex items-center gap-2`}>
-                            <DollarSign size={18}/> Laba Bersih (Net Profit)
-                        </p>
-                        <h3 className={`text-3xl font-extrabold mt-2 ${profitData.net_profit >= 0 ? 'text-green-900' : 'text-red-900'}`}>
-                            Rp {parseInt(profitData.net_profit).toLocaleString('id-ID')}
-                        </h3>
-                        <p className="text-xs opacity-70 mt-2">Setelah dikurangi semua beban</p>
-                    </div>
-                </div>
+            const menuPerf = menuPerfRes.data?.status ? (menuPerfRes.data.data || []) : [];
+            const products = productsRes.data?.status ? (productsRes.data.data || []) : [];
 
-                {/* Detail Breakdown Biaya */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Kiri: Struktur Laba Rugi */}
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                        <h4 className="font-bold text-gray-800 mb-6 flex items-center gap-2">
-                            <TrendingUp size={18} className="text-gray-500" /> Analisa Laba Rugi
-                        </h4>
-                        
-                        <div className="space-y-4">
-                            <div className="flex justify-between items-center py-2 border-b border-gray-50">
-                                <span className="text-gray-600">Pendapatan Kotor</span>
-                                <span className="font-bold text-gray-800">Rp {parseInt(profitData.revenue).toLocaleString()}</span>
-                            </div>
-                            <div className="flex justify-between items-center py-2 border-b border-gray-50">
-                                <span className="text-gray-600">(-) HPP (Modal Bahan)</span>
-                                <span className="font-medium text-red-500">- Rp {parseInt(profitData.cogs).toLocaleString()}</span>
-                            </div>
-                            <div className="flex justify-between items-center py-3 bg-gray-50 px-3 rounded-lg">
-                                <span className="font-bold text-gray-700">Laba Kotor (Gross Profit)</span>
-                                <span className="font-bold text-brand-darkest">Rp {parseInt(profitData.gross_profit).toLocaleString()}</span>
-                            </div>
-                            
-                            {/* Breakdown Expenses */}
-                            <div className="pl-4 space-y-2 border-l-2 border-gray-100 mt-2">
-                                <div className="flex justify-between items-center text-sm">
-                                    <span className="text-gray-500">(-) Biaya Gaji (Payroll)</span>
-                                    <span className="text-red-400">- Rp {parseInt(expenses.payroll).toLocaleString()}</span>
-                                </div>
-                                <div className="flex justify-between items-center text-sm">
-                                    <span className="text-gray-500">(-) Biaya Operasional (Listrik/Sewa/dll)</span>
-                                    <span className="text-red-400">- Rp {parseInt(expenses.operational).toLocaleString()}</span>
-                                </div>
-                            </div>
+            const perfMapByName = new Map(
+                menuPerf.map((item) => [
+                    String(item.name || '').trim().toLowerCase(),
+                    {
+                        qty: Number(item.qty || 0),
+                        revenue: Number(item.revenue || 0),
+                    },
+                ])
+            );
 
-                            <div className="flex justify-between items-center py-4 border-t-2 border-gray-100 mt-4">
-                                <span className="font-extrabold text-lg text-brand-darkest">LABA BERSIH</span>
-                                <span className={`font-extrabold text-lg ${profitData.net_profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                    Rp {parseInt(profitData.net_profit).toLocaleString()}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
+            const merged = products.map((product) => {
+                const key = String(product.name || '').trim().toLowerCase();
+                const perf = perfMapByName.get(key);
 
-                    {/* Kanan: Cashflow Tambahan */}
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                        <h4 className="font-bold text-gray-800 mb-6 flex items-center gap-2">
-                            <Wallet size={18} className="text-gray-500" /> Informasi Cashflow Lainnya
-                        </h4>
-                        
-                        <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-100 mb-4">
-                            <p className="text-sm text-yellow-700 font-bold mb-1">Pembelian Stok (Purchasing)</p>
-                            <h3 className="text-2xl font-bold text-yellow-800">Rp {parseInt(profitData.cash_outflow_purchasing).toLocaleString('id-ID')}</h3>
-                            <p className="text-xs text-yellow-600 mt-2 leading-relaxed">
-                                Uang tunai yang keluar untuk belanja ke supplier. Angka ini mempengaruhi saldo kas, tetapi secara akuntansi dicatat sebagai HPP saat barang terjual.
-                            </p>
-                        </div>
+                return {
+                    name: product.name,
+                    qty_sold: perf?.qty || 0,
+                    revenue: perf?.revenue || 0,
+                };
+            });
 
-                        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                            <p className="text-sm font-bold text-gray-600 mb-2">Tips Keuangan:</p>
-                            <ul className="text-xs text-gray-500 space-y-2 list-disc pl-4">
-                                <li>Pastikan <b>Laba Kotor</b> minimal 40-50% dari Pendapatan untuk menutupi biaya operasional.</li>
-                                <li>Jika <b>HPP</b> terlalu tinggi, periksa harga beli bahan baku atau kurangi porsi.</li>
-                                <li>Biaya Operasional idealnya tidak lebih dari 20% omzet.</li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
+            merged.sort((first, second) => {
+                if (second.qty_sold !== first.qty_sold) return second.qty_sold - first.qty_sold;
+                return String(first.name).localeCompare(String(second.name), 'id');
+            });
+
+            setTopMenuData(merged);
+        } catch (error) {
+            console.error(error);
+            showAlert('error', 'Gagal', 'Gagal memuat laporan menu terlaris.');
+        } finally {
+            hideLoading();
+        }
     };
 
-    const StockView = () => (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-6 border-b border-gray-100">
-                <h4 className="font-bold text-gray-800">Riwayat Mutasi Stok</h4>
-            </div>
-            <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                    <thead className="text-gray-500 bg-gray-50 uppercase text-xs">
-                        <tr>
-                            <th className="px-6 py-4">Waktu</th>
-                            <th className="px-6 py-4">Item</th>
-                            <th className="px-6 py-4">Tipe</th>
-                            <th className="px-6 py-4 text-right">Jumlah</th>
-                            <th className="px-6 py-4">Ref</th>
-                            <th className="px-6 py-4">User</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                        {stockLogs.map((log) => (
-                            <tr key={log.id} className="hover:bg-gray-50/50">
-                                <td className="px-6 py-4 text-gray-500">{new Date(log.created_at).toLocaleString('id-ID')}</td>
-                                <td className="px-6 py-4 font-medium text-gray-800">{log.item_name}</td>
-                                <td className="px-6 py-4">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-bold ${log.type === 'in' ? 'bg-green-100 text-green-600' : (log.type === 'sale' ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600')}`}>
-                                        {log.type === 'in' ? 'Masuk' : (log.type === 'sale' ? 'Terjual' : 'Keluar')}
-                                    </span>
-                                </td>
-                                <td className={`px-6 py-4 text-right font-bold ${log.qty > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                    {parseFloat(log.qty) > 0 ? '+' : ''}{parseFloat(log.qty)} {log.unit}
-                                </td>
-                                <td className="px-6 py-4 text-gray-500 text-xs">{log.reference_id}</td>
-                                <td className="px-6 py-4 text-gray-500">{log.user_name}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-                
-                <div className="p-4 border-t border-gray-50 flex justify-between items-center bg-gray-50/50">
-                    <button 
-                        onClick={() => setStockPage(prev => Math.max(prev - 1, 1))}
-                        disabled={stockPage === 1}
-                        className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <ChevronLeft size={16} /> Prev
-                    </button>
-                    <span className="text-sm text-gray-500">Halaman {stockPage} dari {stockTotalPages}</span>
-                    <button 
-                        onClick={() => setStockPage(prev => Math.min(prev + 1, stockTotalPages))}
-                        disabled={stockPage === stockTotalPages}
-                        className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Next <ChevronRight size={16} />
-                    </button>
-                </div>
-            </div>
+    const cashierData = useMemo(() => {
+        return cashierRawData
+            .filter((item) => {
+                const startValue = item.start_time || item.created_at;
+                if (!startValue) return false;
+
+                const dateOnly = toDateInputValue(new Date(startValue));
+                if (dateOnly < cashierStartDate || dateOnly > cashierEndDate) return false;
+
+                const shiftLabel = getShiftLabelFromDateTime(startValue);
+                if (selectedShift !== 'all' && shiftLabel !== selectedShift) return false;
+
+                return true;
+            })
+            .map((item) => {
+                const salesCash = Number(item.total_sales_cash || 0);
+                const salesNonCash = Number(item.total_sales_non_cash || 0);
+
+                return {
+                    id: item.id,
+                    shift_label: getShiftLabelFromDateTime(item.start_time || item.created_at),
+                    cashier_name: item.user_name || 'N/A',
+                    start_time: item.start_time,
+                    end_time: item.end_time,
+                    sales_cash: salesCash,
+                    sales_non_cash: salesNonCash,
+                    total_sales: salesCash + salesNonCash,
+                    status: item.status,
+                };
+            })
+            .sort((first, second) => new Date(second.start_time || 0).getTime() - new Date(first.start_time || 0).getTime());
+    }, [cashierRawData, cashierStartDate, cashierEndDate, selectedShift]);
+
+    const salesSummary = useMemo(() => {
+        const totalRevenue = salesData.daily.reduce((sum, item) => sum + Number(item.total || 0), 0);
+        const totalTransactions = salesData.daily.reduce((sum, item) => sum + Number(item.count || 0), 0);
+
+        return {
+            totalRevenue,
+            totalTransactions,
+        };
+    }, [salesData.daily]);
+
+    const cashierSummary = useMemo(() => {
+        const totalSales = cashierData.reduce((sum, item) => sum + Number(item.total_sales || 0), 0);
+        const totalShifts = cashierData.length;
+
+        return {
+            totalSales,
+            totalShifts,
+        };
+    }, [cashierData]);
+
+    const topMenuSummary = useMemo(() => {
+        const totalQty = topMenuData.reduce((sum, item) => sum + Number(item.qty_sold || 0), 0);
+        const totalRevenue = topMenuData.reduce((sum, item) => sum + Number(item.revenue || 0), 0);
+
+        return {
+            totalQty,
+            totalRevenue,
+        };
+    }, [topMenuData]);
+
+    const exportToExcel = (fileName, columns, rows) => {
+        if (!rows.length) {
+            showAlert('warning', 'Kosong', 'Data laporan masih kosong.');
+            return;
+        }
+
+        const excelRows = rows.map((row) => {
+            const mapped = {};
+            columns.forEach((column) => {
+                mapped[column.label] = row[column.key];
+            });
+            return mapped;
+        });
+
+        const worksheet = XLSX.utils.json_to_sheet(excelRows);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Laporan');
+        XLSX.writeFile(workbook, `${fileName}.xlsx`);
+    };
+
+    const exportToPdf = (title, fileName, columns, rows) => {
+        if (!rows.length) {
+            showAlert('warning', 'Kosong', 'Data laporan masih kosong.');
+            return;
+        }
+
+        const doc = new jsPDF({ orientation: 'landscape' });
+        doc.setFontSize(14);
+        doc.text(title, 14, 14);
+
+        autoTable(doc, {
+            startY: 20,
+            head: [columns.map((column) => column.label)],
+            body: rows.map((row) => columns.map((column) => row[column.key])),
+            styles: { fontSize: 9 },
+            headStyles: { fillColor: [217, 41, 41] },
+        });
+
+        doc.save(`${fileName}.pdf`);
+    };
+
+    const printTable = (title, columns, rows) => {
+        if (!rows.length) {
+            showAlert('warning', 'Kosong', 'Data laporan masih kosong.');
+            return;
+        }
+
+        const printWindow = window.open('', '_blank', 'width=1200,height=800');
+        if (!printWindow) return;
+
+        const tableHeader = columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('');
+        const tableRows = rows
+            .map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column.key])}</td>`).join('')}</tr>`)
+            .join('');
+
+        printWindow.document.write(`
+            <html>
+                <head>
+                    <title>${escapeHtml(title)}</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; padding: 24px; }
+                        h1 { font-size: 18px; margin-bottom: 16px; }
+                        table { width: 100%; border-collapse: collapse; }
+                        th, td { border: 1px solid #d1d5db; padding: 8px 10px; font-size: 12px; text-align: left; }
+                        th { background: #f3f4f6; }
+                    </style>
+                </head>
+                <body>
+                    <h1>${escapeHtml(title)}</h1>
+                    <table>
+                        <thead>
+                            <tr>${tableHeader}</tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                </body>
+            </html>
+        `);
+
+        printWindow.document.close();
+        printWindow.focus();
+        printWindow.print();
+    };
+
+    const salesColumns = [
+        { key: 'date', label: 'Tanggal' },
+        { key: 'transaction_count', label: 'Jumlah Transaksi' },
+        { key: 'revenue', label: 'Omzet' },
+    ];
+
+    const salesRows = salesData.daily.map((item) => ({
+        date: formatDateOnly(item.date),
+        transaction_count: Number(item.count || 0),
+        revenue: formatCurrency(item.total),
+    }));
+
+    const cashierColumns = [
+        { key: 'shift_label', label: 'Shift' },
+        { key: 'cashier_name', label: 'Kasir' },
+        { key: 'start_time', label: 'Mulai Shift' },
+        { key: 'end_time', label: 'Tutup Shift' },
+        { key: 'sales_cash', label: 'Penjualan Cash' },
+        { key: 'sales_non_cash', label: 'Penjualan Non Cash' },
+        { key: 'total_sales', label: 'Total Penjualan' },
+        { key: 'status', label: 'Status' },
+    ];
+
+    const cashierRows = cashierData.map((item) => ({
+        shift_label: item.shift_label,
+        cashier_name: item.cashier_name,
+        start_time: formatDateTime(item.start_time),
+        end_time: formatDateTime(item.end_time),
+        sales_cash: formatCurrency(item.sales_cash),
+        sales_non_cash: formatCurrency(item.sales_non_cash),
+        total_sales: formatCurrency(item.total_sales),
+        status: String(item.status || '').toUpperCase(),
+    }));
+
+    const topMenuColumns = [
+        { key: 'rank', label: 'Peringkat' },
+        { key: 'name', label: 'Nama Menu' },
+        { key: 'qty_sold', label: 'Jumlah Terjual' },
+        { key: 'revenue', label: 'Omzet' },
+    ];
+
+    const topMenuRows = topMenuData.map((item, index) => ({
+        rank: index + 1,
+        name: item.name,
+        qty_sold: Number(item.qty_sold || 0),
+        revenue: formatCurrency(item.revenue),
+    }));
+
+    const renderActionButtons = (title, fileName, columns, rows) => (
+        <div className="flex flex-wrap items-center gap-2">
+            <button
+                onClick={() => printTable(title, columns, rows)}
+                className="px-3 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm font-semibold text-gray-700 flex items-center gap-2"
+            >
+                <Printer size={16} /> Print
+            </button>
+            <button
+                onClick={() => exportToExcel(fileName, columns, rows)}
+                className="px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-sm font-semibold text-emerald-700 flex items-center gap-2"
+            >
+                <FileSpreadsheet size={16} /> Export Excel
+            </button>
+            <button
+                onClick={() => exportToPdf(title, fileName, columns, rows)}
+                className="px-3 py-2 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-sm font-semibold text-rose-700 flex items-center gap-2"
+            >
+                <FileDown size={16} /> Export PDF
+            </button>
         </div>
     );
 
     return (
         <div className="space-y-6 pb-20">
-            <div className="flex flex-col md:flex-row justify-between items-end gap-4 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-                <div>
-                    <h3 className="text-brand-darkest font-bold text-2xl">Laporan Bisnis</h3>
-                    <p className="text-gray-500 text-sm">Analisa performa penjualan dan stok.</p>
-                </div>
-                
-                <div className="flex items-center gap-2 bg-gray-50 p-2 rounded-xl border border-gray-200">
-                    <Calendar size={18} className="text-gray-400 ml-2" />
-                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-sm outline-none text-gray-600 font-medium" />
-                    <span className="text-gray-400">-</span>
-                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-sm outline-none text-gray-600 font-medium" />
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                <h3 className="text-2xl font-extrabold text-brand-darkest">Laporan</h3>
+                <p className="text-sm text-gray-500 mt-1">Semua laporan dapat di-print dan di-export ke Excel/PDF.</p>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                        onClick={() => navigate(REPORT_ROUTES.sales)}
+                        className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 border ${activeReport === 'sales' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                    >
+                        <BarChart3 size={16} /> Per Periode
+                    </button>
+                    <button
+                        onClick={() => navigate(REPORT_ROUTES.cashier)}
+                        className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 border ${activeReport === 'cashier' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                    >
+                        <User size={16} /> Per Shift
+                    </button>
+                    <button
+                        onClick={() => navigate(REPORT_ROUTES.topMenu)}
+                        className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 border ${activeReport === 'topMenu' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                    >
+                        <UtensilsCrossed size={16} /> Barang Terlaris
+                    </button>
                 </div>
             </div>
 
-            <div className="flex gap-2 border-b border-gray-200 pb-1 overflow-x-auto">
-                <button onClick={() => setActiveTab('sales')} className={`px-6 py-2 text-sm font-bold rounded-t-xl transition-colors ${activeTab === 'sales' ? 'bg-white text-brand-primary border-b-2 border-brand-primary' : 'text-gray-500 hover:text-gray-700'}`}>
-                    Penjualan
-                </button>
-                <button onClick={() => setActiveTab('stock')} className={`px-6 py-2 text-sm font-bold rounded-t-xl transition-colors ${activeTab === 'stock' ? 'bg-white text-brand-primary border-b-2 border-brand-primary' : 'text-gray-500 hover:text-gray-700'}`}>
-                    Mutasi Stok
-                </button>
-                <button onClick={() => setActiveTab('profit')} className={`px-6 py-2 text-sm font-bold rounded-t-xl transition-colors ${activeTab === 'profit' ? 'bg-white text-brand-primary border-b-2 border-brand-primary' : 'text-gray-500 hover:text-gray-700'}`}>
-                    Laba Rugi
-                </button>
-            </div>
+            {activeReport === 'sales' && (
+                <div className="space-y-4">
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+                        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-2">
+                            <Calendar size={16} className="text-gray-400 ml-1" />
+                            <DateDisplayField value={salesStartDate} onChange={(event) => setSalesStartDate(event.target.value)} />
+                            <span className="text-gray-400">s/d</span>
+                            <DateDisplayField value={salesEndDate} onChange={(event) => setSalesEndDate(event.target.value)} />
+                        </div>
 
-            <div className="min-h-[400px]">
-                {activeTab === 'sales' && <SalesView />}
-                {activeTab === 'stock' && <StockView />}
-                {activeTab === 'profit' && <ProfitView />}
-            </div>
+                        {renderActionButtons(
+                            `Laporan Penjualan ${formatDateOnly(salesStartDate)} - ${formatDateOnly(salesEndDate)}`,
+                            `laporan_penjualan_${salesStartDate}_${salesEndDate}`,
+                            salesColumns,
+                            salesRows
+                        )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                            <p className="text-xs font-bold uppercase text-gray-500">Total Omzet</p>
+                            <h4 className="text-2xl font-extrabold text-brand-darkest mt-1">{formatCurrency(salesSummary.totalRevenue)}</h4>
+                        </div>
+                        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                            <p className="text-xs font-bold uppercase text-gray-500">Total Transaksi</p>
+                            <h4 className="text-2xl font-extrabold text-brand-darkest mt-1">{salesSummary.totalTransactions}</h4>
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100 font-bold text-gray-800">Detail Penjualan Harian</div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
+                                    <tr>
+                                        <th className="px-5 py-3 text-left">Tanggal</th>
+                                        <th className="px-5 py-3 text-left">Transaksi</th>
+                                        <th className="px-5 py-3 text-left">Omzet</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {salesRows.map((row, index) => (
+                                        <tr key={`sales-${index}`}>
+                                            <td className="px-5 py-3">{row.date}</td>
+                                            <td className="px-5 py-3">{row.transaction_count}</td>
+                                            <td className="px-5 py-3 font-semibold text-gray-800">{row.revenue}</td>
+                                        </tr>
+                                    ))}
+                                    {salesRows.length === 0 && (
+                                        <tr>
+                                            <td colSpan={3} className="px-5 py-8 text-center text-gray-400">Belum ada data pada periode ini.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {activeReport === 'cashier' && (
+                <div className="space-y-4">
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-2">
+                                <Calendar size={16} className="text-gray-400 ml-1" />
+                                <DateDisplayField value={cashierStartDate} onChange={(event) => setCashierStartDate(event.target.value)} />
+                                <span className="text-gray-400">s/d</span>
+                                <DateDisplayField value={cashierEndDate} onChange={(event) => setCashierEndDate(event.target.value)} />
+                            </div>
+
+                            <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl p-2">
+                                <Filter size={16} className="text-gray-400 ml-1" />
+                                <select value={selectedShift} onChange={(event) => setSelectedShift(event.target.value)} className="bg-transparent text-sm outline-none text-gray-700">
+                                    {SHIFT_OPTIONS.map((option) => (
+                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+
+                        {renderActionButtons(
+                            `Laporan Per Kasir ${formatDateOnly(cashierStartDate)} - ${formatDateOnly(cashierEndDate)} (${selectedShift === 'all' ? 'Semua Shift' : `Shift ${selectedShift}`})`,
+                            `laporan_per_kasir_${cashierStartDate}_${cashierEndDate}_${selectedShift}`,
+                            cashierColumns,
+                            cashierRows
+                        )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                            <p className="text-xs font-bold uppercase text-gray-500">Total Penjualan</p>
+                            <h4 className="text-2xl font-extrabold text-brand-darkest mt-1">{formatCurrency(cashierSummary.totalSales)}</h4>
+                        </div>
+                        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                            <p className="text-xs font-bold uppercase text-gray-500">Jumlah Shift</p>
+                            <h4 className="text-2xl font-extrabold text-brand-darkest mt-1">{cashierSummary.totalShifts}</h4>
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100 font-bold text-gray-800">Detail Laporan Per Kasir</div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
+                                    <tr>
+                                        <th className="px-5 py-3 text-left">Shift</th>
+                                        <th className="px-5 py-3 text-left">Kasir</th>
+                                        <th className="px-5 py-3 text-left">Mulai</th>
+                                        <th className="px-5 py-3 text-left">Tutup</th>
+                                        <th className="px-5 py-3 text-left">Cash</th>
+                                        <th className="px-5 py-3 text-left">Non Cash</th>
+                                        <th className="px-5 py-3 text-left">Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {cashierRows.map((row, index) => (
+                                        <tr key={`cashier-${index}`}>
+                                            <td className="px-5 py-3 font-semibold">{row.shift_label}</td>
+                                            <td className="px-5 py-3">{row.cashier_name}</td>
+                                            <td className="px-5 py-3">{row.start_time}</td>
+                                            <td className="px-5 py-3">{row.end_time}</td>
+                                            <td className="px-5 py-3">{row.sales_cash}</td>
+                                            <td className="px-5 py-3">{row.sales_non_cash}</td>
+                                            <td className="px-5 py-3 font-semibold text-gray-800">{row.total_sales}</td>
+                                        </tr>
+                                    ))}
+                                    {cashierRows.length === 0 && (
+                                        <tr>
+                                            <td colSpan={7} className="px-5 py-8 text-center text-gray-400">Belum ada data kasir pada filter ini.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {activeReport === 'topMenu' && (
+                <div className="space-y-4">
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+                        <div>
+                            <p className="text-sm text-gray-500">Diurutkan dari menu paling laris sampai yang belum terjual.</p>
+                        </div>
+
+                        {renderActionButtons(
+                            'Laporan Menu Terlaris',
+                            'laporan_menu_terlaris',
+                            topMenuColumns,
+                            topMenuRows
+                        )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                            <p className="text-xs font-bold uppercase text-gray-500">Total Qty Terjual</p>
+                            <h4 className="text-2xl font-extrabold text-brand-darkest mt-1">{topMenuSummary.totalQty}</h4>
+                        </div>
+                        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                            <p className="text-xs font-bold uppercase text-gray-500">Total Omzet Menu</p>
+                            <h4 className="text-2xl font-extrabold text-brand-darkest mt-1">{formatCurrency(topMenuSummary.totalRevenue)}</h4>
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100 font-bold text-gray-800">Peringkat Menu</div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
+                                    <tr>
+                                        <th className="px-5 py-3 text-left">#</th>
+                                        <th className="px-5 py-3 text-left">Nama Menu</th>
+                                        <th className="px-5 py-3 text-left">Jumlah Terjual</th>
+                                        <th className="px-5 py-3 text-left">Omzet</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {topMenuRows.map((row) => (
+                                        <tr key={`menu-${row.rank}-${row.name}`}>
+                                            <td className="px-5 py-3 font-semibold">{row.rank}</td>
+                                            <td className="px-5 py-3">{row.name}</td>
+                                            <td className="px-5 py-3">{row.qty_sold}</td>
+                                            <td className="px-5 py-3 font-semibold text-gray-800">{row.revenue}</td>
+                                        </tr>
+                                    ))}
+                                    {topMenuRows.length === 0 && (
+                                        <tr>
+                                            <td colSpan={4} className="px-5 py-8 text-center text-gray-400">Belum ada data menu.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

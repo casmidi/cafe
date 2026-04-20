@@ -1,5 +1,5 @@
 import {
-    LayoutDashboard, UtensilsCrossed, ClipboardList, Settings, LogOut, X, Monitor, Package, ChefHat, Truck, Box, BarChart3, Users as UsersIcon, Smile, Wallet, Tag, Grid, ClipboardCheck, UserCheck, DollarSign, Coins, Activity
+    LayoutDashboard, UtensilsCrossed, ClipboardList, Settings, LogOut, X, Monitor, Package, ChefHat, Truck, Box, BarChart3, Users as UsersIcon, Smile, Wallet, Tag, Grid, ClipboardCheck, UserCheck, DollarSign, Coins, Activity, TrendingUp
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import useUIStore from '../store/useUIStore';
@@ -41,7 +41,16 @@ export default function Sidebar({ isOpen, toggleSidebar, handleLogout }) {
                 { name: 'Pembelian (PO)', icon: Truck, path: '/purchasing', allowedRoles: ['owner', 'admin'] },
                 { name: 'Penerimaan', icon: Box, path: '/receiving', allowedRoles: ['owner', 'admin', 'dapur'] },
                 { name: 'Pengeluaran', icon: Coins, path: '/expenses', allowedRoles: ['owner', 'admin'] },
-                { name: 'Laporan', icon: BarChart3, path: '/reports', allowedRoles: ['owner', 'admin'] },
+                {
+                    name: 'Laporan',
+                    icon: BarChart3,
+                    allowedRoles: ['owner', 'admin'],
+                    children: [
+                        { name: 'Per Periode', icon: TrendingUp, path: '/reports/sales-period', allowedRoles: ['owner', 'admin'] },
+                        { name: 'Per Shift', icon: Wallet, path: '/reports/cashier', allowedRoles: ['owner', 'admin'] },
+                        { name: 'Barang Terlaris', icon: UtensilsCrossed, path: '/reports/top-menu', allowedRoles: ['owner', 'admin'] },
+                    ]
+                },
                 { name: 'Analisis Bisnis', icon: Activity, path: '/analytics', allowedRoles: ['owner', 'admin'] },
             ]
         },
@@ -64,10 +73,28 @@ export default function Sidebar({ isOpen, toggleSidebar, handleLogout }) {
     ];
 
     // Filter Menu Berdasarkan Role
-    const filteredMenuGroups = menuGroups.map(group => ({
-        ...group,
-        items: group.items.filter(item => item.allowedRoles.includes(role))
-    })).filter(group => group.items.length > 0); // Hapus grup jika kosong
+    const filteredMenuGroups = menuGroups
+        .map(group => ({
+            ...group,
+            items: group.items
+                .map(item => {
+                    if (!item.children) {
+                        return item.allowedRoles.includes(role) ? item : null;
+                    }
+
+                    const filteredChildren = item.children.filter(child => child.allowedRoles.includes(role));
+                    if (!item.allowedRoles.includes(role) || filteredChildren.length === 0) {
+                        return null;
+                    }
+
+                    return {
+                        ...item,
+                        children: filteredChildren,
+                    };
+                })
+                .filter(Boolean)
+        }))
+        .filter(group => group.items.length > 0); // Hapus grup jika kosong
 
     return (
         <>
@@ -100,17 +127,48 @@ export default function Sidebar({ isOpen, toggleSidebar, handleLogout }) {
                             </p>
                             <div className="space-y-1">
                                 {group.items.map((item) => {
-                                    const isActive = location.pathname === item.path;
+                                    if (!item.children) {
+                                        const isActive = location.pathname === item.path;
+                                        return (
+                                            <Link
+                                                key={item.name}
+                                                to={item.path}
+                                                onClick={() => isOpen && toggleSidebar()}
+                                                className={`flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200 group ${isActive ? 'bg-brand-primary text-white shadow-lg shadow-brand-primary/30 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-brand-darkest'}`}
+                                            >
+                                                <item.icon size={18} className={isActive ? 'text-white' : 'text-gray-400 group-hover:text-brand-primary'} />
+                                                <span className="text-sm">{item.name}</span>
+                                            </Link>
+                                        );
+                                    }
+
+                                    const isParentActive = item.children.some(child => location.pathname === child.path);
+
                                     return (
-                                        <Link
-                                            key={item.name}
-                                            to={item.path}
-                                            onClick={() => isOpen && toggleSidebar()}
-                                            className={`flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200 group ${isActive ? 'bg-brand-primary text-white shadow-lg shadow-brand-primary/30 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-brand-darkest'}`}
-                                        >
-                                            <item.icon size={18} className={isActive ? 'text-white' : 'text-gray-400 group-hover:text-brand-primary'} />
-                                            <span className="text-sm">{item.name}</span>
-                                        </Link>
+                                        <div key={item.name} className="space-y-1">
+                                            <div className={`flex items-center gap-3 px-4 py-2.5 rounded-xl ${isParentActive ? 'bg-brand-bg text-brand-primary font-bold' : 'text-gray-600 bg-gray-50'}`}>
+                                                <item.icon size={18} className={isParentActive ? 'text-brand-primary' : 'text-gray-400'} />
+                                                <span className="text-sm">{item.name}</span>
+                                            </div>
+
+                                            <div className="pl-8 space-y-1 border-l border-gray-100 ml-4">
+                                                {item.children.map((child) => {
+                                                    const isChildActive = location.pathname === child.path;
+
+                                                    return (
+                                                        <Link
+                                                            key={child.name}
+                                                            to={child.path}
+                                                            onClick={() => isOpen && toggleSidebar()}
+                                                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-200 group ${isChildActive ? 'bg-brand-primary text-white shadow-md shadow-brand-primary/20 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-brand-darkest'}`}
+                                                        >
+                                                            <child.icon size={16} className={isChildActive ? 'text-white' : 'text-gray-400 group-hover:text-brand-primary'} />
+                                                            <span className="text-sm">{child.name}</span>
+                                                        </Link>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
                                     );
                                 })}
                             </div>
